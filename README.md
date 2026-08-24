@@ -1,7 +1,6 @@
-```
 <div align="center">
 
-# Esperto
+# 🧠 Esperto
 
 **Um cliente desktop ultrarrápido, leve e elegante para o Google Gemini.**
 
@@ -11,7 +10,6 @@
 [![TailwindCSS](https://img.shields.io/badge/TailwindCSS-3.x-38bdf8?logo=tailwind-css)](https://tailwindcss.com/)
 
 </div>
-```
 
 ---
 
