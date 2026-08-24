@@ -17,9 +17,10 @@ export async function* streamGemini({
   newMessage,
 }: StreamOptions) {
   if (!apiKey || !apiKey.trim()) {
-    throw new Error('Chave de API do Gemini não informada. Abra as Configurações e insira sua chave.');
+    throw new Error('Chave de API do Gemini não configurada. Abra as Configurações e cole sua chave.');
   }
 
+  const selectedModel = model.trim() || 'gemini-2.5-flash';
   const ai = new GoogleGenAI({ apiKey: apiKey.trim() });
 
   const contents = history.map((msg) => ({
@@ -32,18 +33,36 @@ export async function* streamGemini({
     parts: [{ text: newMessage }],
   });
 
-  const responseStream = await ai.models.generateContentStream({
-    model: model.trim() || 'gemini-3.7-flash',
-    contents,
-    config: {
-      systemInstruction: systemInstruction || 'Você é o Esperto, uma entidade oracular de inteligência e sabedoria.',
-      temperature: 0.7,
-    },
-  });
+  try {
+    const responseStream = await ai.models.generateContentStream({
+      model: selectedModel,
+      contents,
+      config: {
+        systemInstruction: systemInstruction || 'Você é o Esperto, uma entidade oracular de inteligência e sabedoria.',
+        temperature: 0.7,
+      },
+    });
 
-  for await (const chunk of responseStream) {
-    if (chunk.text) {
-      yield chunk.text;
+    for await (const chunk of responseStream) {
+      if (chunk.text) {
+        yield chunk.text;
+      }
     }
+  } catch (err: any) {
+    const errMessage = err?.message || JSON.stringify(err);
+
+    if (errMessage.includes('503') || errMessage.includes('high demand')) {
+      throw new Error(
+        `O modelo '${selectedModel}' está com sobrecarga temporária nos servidores do Google. Tente o 'gemini-2.5-flash' nas Configurações.`
+      );
+    }
+
+    if (errMessage.includes('429') || errMessage.includes('limit: 0') || errMessage.includes('RESOURCE_EXHAUSTED')) {
+      throw new Error(
+        `O modelo '${selectedModel}' não possui cota gratuita liberada nesta chave. Alterne para o 'gemini-2.5-flash' nas Configurações.`
+      );
+    }
+
+    throw new Error(`Erro na API do Gemini: ${errMessage}`);
   }
 }
