@@ -3,8 +3,9 @@ import Dexie, { type Table } from 'dexie';
 export interface Attachment {
   name: string;
   mimeType: string;
-  data: string; // Base64
+  data: string; // Base64 ou texto
   size?: number;
+  isSnippet?: boolean;
 }
 
 export interface Chat {
@@ -33,9 +34,14 @@ export interface Settings {
   openaiApiKey?: string;
   anthropicApiKey?: string;
   deepseekApiKey?: string;
-  // Configurações Avançadas (Estilo AI Studio):
-  mediaResolution?: 'default' | 'low' | 'medium' | 'high';
+  
+  // Parâmetros de IA Avançados:
+  temperature?: number;
+  topP?: number;
+  maxOutputTokens?: number;
   thinkingLevel?: 'off' | 'low' | 'medium' | 'high';
+  thinkingBudget?: number;
+  mediaResolution?: 'default' | 'low' | 'medium' | 'high';
   googleSearch?: boolean;
 }
 

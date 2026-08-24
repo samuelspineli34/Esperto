@@ -8,9 +8,14 @@ interface StreamOptions {
   history: Message[];
   newMessage: string;
   attachments?: Attachment[];
+  temperature?: number;
+  topP?: number;
+  maxOutputTokens?: number;
+  thinkingLevel?: string;
+  thinkingBudget?: number;
   mediaResolution?: string;
   googleSearch?: boolean;
-  thinkingLevel?: string;
+  signal?: AbortSignal;
 }
 
 export async function* streamGemini({
@@ -20,21 +25,25 @@ export async function* streamGemini({
   history,
   newMessage,
   attachments = [],
+  temperature = 0.7,
+  topP = 0.95,
+  maxOutputTokens,
+  thinkingLevel = 'off',
+  thinkingBudget,
   mediaResolution = 'default',
   googleSearch = false,
-  thinkingLevel = 'off',
+  signal,
 }: StreamOptions) {
   if (!apiKey || !apiKey.trim()) {
-    throw new Error('Chave de API do Gemini não informada.');
+    throw new Error('Chave de API do Gemini não configurada.');
   }
 
   const selectedModel = model.trim() || 'gemini-3.7-flash';
   const ai = new GoogleGenAI({ apiKey: apiKey.trim() });
 
-  // 1. Converte histórico com textos e anexos passados
   const contents = history.map((msg) => {
     const parts: any[] = [{ text: msg.content }];
-    if (msg.attachments && msg.attachments.length > 0) {
+    if (msg.attachments) {
       msg.attachments.forEach((att) => {
         parts.push({
           inlineData: {
@@ -50,43 +59,42 @@ export async function* streamGemini({
     };
   });
 
-  // 2. Adiciona a nova mensagem com os novos anexos
   const newParts: any[] = [{ text: newMessage }];
-  if (attachments.length > 0) {
-    attachments.forEach((att) => {
-      newParts.push({
-        inlineData: {
-          mimeType: att.mimeType,
-          data: att.data,
-        },
-      });
+  attachments.forEach((att) => {
+    newParts.push({
+      inlineData: {
+        mimeType: att.mimeType,
+        data: att.data,
+      },
     });
-  }
+  });
 
   contents.push({
     role: 'user',
     parts: newParts,
   });
 
-  // 3. Monta configuração com Google Search e Resolução de Mídia
   const config: any = {
     systemInstruction: systemInstruction || 'Você é o Esperto, uma entidade oracular de inteligência e sabedoria.',
-    temperature: 0.7,
+    temperature,
+    topP,
   };
 
-  // Google Search Grounding
+  if (maxOutputTokens) config.maxOutputTokens = maxOutputTokens;
+
+  // Thinking Config (Gemini 3.7 Flash)
+  if (thinkingLevel !== 'off' || thinkingBudget) {
+    config.thinkingConfig = {
+      thinkingBudget: thinkingBudget || (thinkingLevel === 'high' ? 8192 : thinkingLevel === 'medium' ? 2048 : 1024),
+    };
+  }
+
   if (googleSearch) {
     config.tools = [{ googleSearch: {} }];
   }
 
-  // Resolução de Mídia
   if (mediaResolution && mediaResolution !== 'default') {
-    const resMap: Record<string, string> = {
-      low: 'MEDIA_RESOLUTION_LOW',
-      medium: 'MEDIA_RESOLUTION_MEDIUM',
-      high: 'MEDIA_RESOLUTION_HIGH',
-    };
-    config.mediaResolution = resMap[mediaResolution];
+    config.mediaResolution = `MEDIA_RESOLUTION_${mediaResolution.toUpperCase()}`;
   }
 
   try {
@@ -97,15 +105,14 @@ export async function* streamGemini({
     });
 
     for await (const chunk of responseStream) {
+      if (signal?.aborted) break;
       if (chunk.text) {
         yield chunk.text;
       }
     }
   } catch (err: any) {
+    if (signal?.aborted) return;
     const errMessage = err?.message || JSON.stringify(err);
-    if (errMessage.includes('503') || errMessage.includes('high demand')) {
-      throw new Error(`⚠️ O modelo '${selectedModel}' está sobrecarregado no Google. Tente o 'gemini-3.6-flash'.`);
-    }
     throw new Error(`Erro Gemini: ${errMessage}`);
   }
 }

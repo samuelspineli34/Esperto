@@ -14,6 +14,7 @@ export interface StreamOptions {
   newMessage: string;
   attachments?: Attachment[];
   useMemory?: boolean;
+  signal?: AbortSignal;
 }
 
 export async function* streamAIResponse({
@@ -25,6 +26,7 @@ export async function* streamAIResponse({
   newMessage,
   attachments = [],
   useMemory = true,
+  signal,
 }: StreamOptions) {
   const provider = getProviderByModel(model);
   const relevantHistory = useMemory ? history : [];
@@ -34,7 +36,6 @@ export async function* streamAIResponse({
     finalSystemInstruction += `\n\n[MEMÓRIA GLOBAL DO USUÁRIO]:\n${globalMemory.trim()}`;
   }
 
-  // 1. Google Gemini
   if (provider === 'gemini') {
     const key = settings.geminiApiKey || (settings as any).apiKey;
     if (!key) throw new Error('Chave de API do Gemini não configurada.');
@@ -45,14 +46,18 @@ export async function* streamAIResponse({
       history: relevantHistory,
       newMessage,
       attachments,
+      temperature: settings.temperature,
+      topP: settings.topP,
+      maxOutputTokens: settings.maxOutputTokens,
+      thinkingLevel: settings.thinkingLevel,
+      thinkingBudget: settings.thinkingBudget,
       mediaResolution: settings.mediaResolution,
       googleSearch: settings.googleSearch,
-      thinkingLevel: settings.thinkingLevel,
+      signal,
     });
     return;
   }
 
-  // 2. Anthropic Claude
   if (provider === 'anthropic') {
     if (!settings.anthropicApiKey) throw new Error('Chave de API do Claude não configurada.');
     yield* streamClaude({
@@ -65,7 +70,6 @@ export async function* streamAIResponse({
     return;
   }
 
-  // 3. OpenAI
   if (provider === 'openai') {
     if (!settings.openaiApiKey) throw new Error('Chave de API da OpenAI não configurada.');
     yield* streamOpenAI({
@@ -78,7 +82,6 @@ export async function* streamAIResponse({
     return;
   }
 
-  // 4. DeepSeek
   if (provider === 'deepseek') {
     if (!settings.deepseekApiKey) throw new Error('Chave de API da DeepSeek não configurada.');
     yield* streamDeepSeek({

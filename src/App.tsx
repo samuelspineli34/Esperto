@@ -7,13 +7,15 @@ import { ChatMessage } from './components/ChatMessage';
 import { SettingsModal } from './components/SettingsModal';
 import { UpdateModal } from './components/UpdateModal';
 import { checkForUpdates, ReleaseInfo } from './services/updater';
-import { Send, Sliders, Eye, Brain, Copy, Paperclip, X, FileText, Image as ImageIcon, Activity } from 'lucide-react';
+import { Send, Sliders, Eye, Brain, Copy, Paperclip, X, FileText, Image as ImageIcon, Activity, Square } from 'lucide-react';
 
 const defaultSettings: Settings = {
   id: 'default',
   model: 'gemini-3.7-flash',
   globalMemory: '',
   geminiApiKey: '',
+  temperature: 0.7,
+  thinkingLevel: 'off',
   mediaResolution: 'default',
   googleSearch: false,
 };
@@ -37,10 +39,12 @@ export default function App() {
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Calcula contagem de tokens aproximada e porcentagem do limite do modelo
   const modelInfo = useMemo(() => getModelInfo(settings.model || 'gemini-3.7-flash'), [settings.model]);
 
+  // Contagem de tokens em tempo real
   const totalEstimatedTokens = useMemo(() => {
     let charCount = (settings.globalMemory || '').length + (systemInstruction || '').length;
     messages.forEach((m) => {
@@ -50,7 +54,7 @@ export default function App() {
       }
     });
     charCount += inputMessage.length;
-    return Math.ceil(charCount / 3.8); // Média de ~3.8 caracteres por token
+    return Math.ceil(charCount / 3.8);
   }, [messages, inputMessage, systemInstruction, settings.globalMemory]);
 
   const tokenUsagePercent = useMemo(() => {
@@ -79,7 +83,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!activeChatId) return;
+    if (!activeChatId) {
+      setMessages([]);
+      return;
+    }
 
     const loadChatData = async () => {
       const activeChat = await db.chats.get(activeChatId);
@@ -116,6 +123,7 @@ export default function App() {
     await db.chats.add(newChat);
     setChats((prev) => [newChat, ...prev]);
     setActiveChatId(newChat.id);
+    setMessages([]);
   };
 
   const handleDuplicateChat = async (sourceChatId: string, e?: React.MouseEvent) => {
@@ -153,14 +161,26 @@ export default function App() {
     setActiveChatId(newChatId);
   };
 
+  const handleRenameChat = async (id: string, newTitle: string) => {
+    await db.chats.update(id, { title: newTitle });
+    setChats((prev) => prev.map((c) => (c.id === id ? { ...c, title: newTitle } : c)));
+  };
+
+  // Exclusão garantida: remove do DB e limpa a tela instantaneamente
   const deleteChat = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     await db.chats.delete(id);
     await db.messages.where('chatId').equals(id).delete();
+
     const updatedChats = chats.filter((c) => c.id !== id);
     setChats(updatedChats);
-    if (activeChatId === id && updatedChats.length > 0) {
-      setActiveChatId(updatedChats[0].id);
+
+    if (activeChatId === id) {
+      if (updatedChats.length > 0) {
+        setActiveChatId(updatedChats[0].id);
+      } else {
+        createNewChat();
+      }
     }
   };
 
@@ -179,19 +199,32 @@ export default function App() {
     }
   };
 
-  // Suporte a colar arquivos e imagens com Ctrl + V
   const handlePaste = async (e: React.ClipboardEvent) => {
     const items = e.clipboardData?.items;
-    if (!items) return;
-
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-      if (item.kind === 'file') {
-        const file = item.getAsFile();
-        if (file) {
-          addFile(file);
+    if (items) {
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].kind === 'file') {
+          const file = items[i].getAsFile();
+          if (file) addFile(file);
+          return;
         }
       }
+    }
+
+    const pastedText = e.clipboardData?.getData('text');
+    if (pastedText && pastedText.length > 800) {
+      e.preventDefault();
+      const tokenCost = Math.ceil(pastedText.length / 3.8);
+      setAttachments((prev) => [
+        ...prev,
+        {
+          name: `Trecho colado (${tokenCost} tokens)`,
+          mimeType: 'text/plain',
+          data: btoa(unescape(encodeURIComponent(pastedText))),
+          size: pastedText.length,
+          isSnippet: true,
+        },
+      ]);
     }
   };
 
@@ -225,52 +258,80 @@ export default function App() {
     setAttachments((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if ((!inputMessage.trim() && attachments.length === 0) || isLoading || !activeChatId) return;
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter') {
+      if (e.ctrlKey || e.shiftKey || e.metaKey) {
+        return;
+      }
+      e.preventDefault();
+      handleSendMessage();
+    }
+  };
 
-    const currentInput = inputMessage;
+  const handleStopGeneration = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsLoading(false);
+  };
+
+  const handleSendMessage = async (customMessageText?: string, baseHistory?: Message[]) => {
+    const textToSend = customMessageText !== undefined ? customMessageText : inputMessage;
+    if ((!textToSend.trim() && attachments.length === 0) || isLoading || !activeChatId) return;
+
+    const currentInput = textToSend;
     const currentAttachments = [...attachments];
     setInputMessage('');
     setAttachments([]);
 
-    const userMsg: Message = {
-      chatId: activeChatId,
-      role: 'user',
-      content: currentInput,
-      attachments: currentAttachments,
-      timestamp: Date.now(),
-    };
-    await db.messages.add(userMsg);
-    setMessages((prev) => [...prev, userMsg]);
+    let currentMessages = baseHistory !== undefined ? baseHistory : messages;
 
-    if (messages.length === 0) {
-      const newTitle = currentInput.slice(0, 26) || currentAttachments[0]?.name || 'Consulta';
-      await db.chats.update(activeChatId, { title: newTitle });
-      setChats((prev) =>
-        prev.map((c) => (c.id === activeChatId ? { ...c, title: newTitle } : c))
-      );
+    // Se for uma nova mensagem do usuário (e não retry de bot)
+    if (customMessageText === undefined || baseHistory !== undefined) {
+      const userMsg: Message = {
+        chatId: activeChatId,
+        role: 'user',
+        content: currentInput,
+        attachments: currentAttachments,
+        timestamp: Date.now(),
+      };
+      await db.messages.add(userMsg);
+      currentMessages = [...currentMessages, userMsg];
+      setMessages(currentMessages);
+
+      if (currentMessages.length === 1) {
+        const newTitle = currentInput.slice(0, 26) || currentAttachments[0]?.name || 'Consulta';
+        await db.chats.update(activeChatId, { title: newTitle });
+        setChats((prev) =>
+          prev.map((c) => (c.id === activeChatId ? { ...c, title: newTitle } : c))
+        );
+      }
     }
 
     setIsLoading(true);
+    abortControllerRef.current = new AbortController();
+
+    // Adiciona placeholder da IA
+    setMessages((prev) => [
+      ...prev,
+      { chatId: activeChatId, role: 'model', content: '', timestamp: Date.now() },
+    ]);
+
+    let responseText = '';
 
     try {
-      let responseText = '';
       const generator = streamAIResponse({
         model: settings.model || 'gemini-3.7-flash',
         settings,
         systemInstruction,
         globalMemory: settings.globalMemory,
-        history: messages,
-        newMessage: currentInput,
+        history: currentMessages.slice(0, -1),
+        newMessage: currentMessages[currentMessages.length - 1]?.content || currentInput,
         attachments: currentAttachments,
         useMemory,
+        signal: abortControllerRef.current.signal,
       });
-
-      setMessages((prev) => [
-        ...prev,
-        { chatId: activeChatId, role: 'model', content: '', timestamp: Date.now() },
-      ]);
 
       for await (const chunk of generator) {
         responseText += chunk;
@@ -284,17 +345,74 @@ export default function App() {
         });
       }
 
-      await db.messages.add({
-        chatId: activeChatId,
-        role: 'model',
-        content: responseText,
-        timestamp: Date.now(),
-      });
+      if (responseText.trim()) {
+        await db.messages.add({
+          chatId: activeChatId,
+          role: 'model',
+          content: responseText,
+          timestamp: Date.now(),
+        });
+      }
     } catch (err: any) {
-      console.error(err);
-      alert(err.message || 'Erro na resposta do Oráculo.');
+      if (!abortControllerRef.current?.signal.aborted) {
+        const errorMessage = `⚠️ Erro: ${err.message || 'Falha na resposta do Oráculo.'}`;
+        
+        // Exibe o erro visualmente no balão de chat sem travar
+        setMessages((prev) => {
+          const updated = [...prev];
+          updated[updated.length - 1] = {
+            ...updated[updated.length - 1],
+            content: errorMessage,
+          };
+          return updated;
+        });
+
+        await db.messages.add({
+          chatId: activeChatId,
+          role: 'model',
+          content: errorMessage,
+          timestamp: Date.now(),
+        });
+      }
     } finally {
       setIsLoading(false);
+      abortControllerRef.current = null;
+    }
+  };
+
+  // Editar pergunta do usuário e re-executar daquele ponto
+  const handleEditMessage = async (index: number, newContent: string) => {
+    if (!activeChatId) return;
+
+    // Apaga do banco as mensagens daquele ponto para frente
+    const messagesToDelete = messages.slice(index);
+    for (const msg of messagesToDelete) {
+      if (msg.id) await db.messages.delete(msg.id);
+    }
+
+    const historyBefore = messages.slice(0, index);
+    setMessages(historyBefore);
+
+    // Reenvia com o novo texto
+    handleSendMessage(newContent, historyBefore);
+  };
+
+  // Regenerar a última resposta da IA
+  const handleRetryLastMessage = async () => {
+    if (messages.length === 0 || isLoading) return;
+
+    // Se a última for do modelo, remove ela e re-executa a partir da última do usuário
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg.role === 'model' && lastMsg.id) {
+      await db.messages.delete(lastMsg.id);
+    }
+
+    const historyWithoutLastModel = messages.filter((_, idx) => idx !== messages.length - 1);
+    setMessages(historyWithoutLastModel);
+
+    const lastUserMsg = historyWithoutLastModel[historyWithoutLastModel.length - 1];
+    if (lastUserMsg) {
+      handleSendMessage(lastUserMsg.content, historyWithoutLastModel.slice(0, -1));
     }
   };
 
@@ -319,13 +437,13 @@ export default function App() {
         onSelectChat={setActiveChatId}
         onNewChat={createNewChat}
         onDuplicateChat={handleDuplicateChat}
+        onRenameChat={handleRenameChat}
         onDeleteChat={deleteChat}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onCheckUpdate={() => handleCheckUpdate(true)}
       />
 
       <main className="flex-1 flex flex-col h-full overflow-hidden relative">
-        {/* Top Header com Indicador de Tokens e Contexto */}
         <header
           data-tauri-drag-region
           className="h-14 border-b border-purple-950/30 flex items-center justify-between px-6 bg-[#090c10] backdrop-blur-sm select-none"
@@ -337,14 +455,14 @@ export default function App() {
             </span>
             <button
               onClick={() => setIsSettingsOpen(true)}
-              className="text-[10px] font-semibold bg-purple-950/80 hover:bg-purple-900/80 text-purple-300 px-2.5 py-0.5 rounded-full border border-purple-800/40 transition"
+              className="text-[10px] font-semibold bg-purple-950/80 hover:bg-purple-900/80 text-purple-300 px-2.5 py-0.5 rounded-full border border-purple-800/40 transition cursor-pointer"
             >
               {settings.model || 'gemini-3.7-flash'}
             </button>
 
-            {/* Medidor de Tokens do Contexto */}
+            {/* Contador de Tokens */}
             <div
-              title={`Uso do contexto: ${totalEstimatedTokens.toLocaleString()} de ${(modelInfo.contextLimit / 1000).toFixed(0)}k tokens`}
+              title={`Contexto estimado: ${totalEstimatedTokens.toLocaleString()} de ${(modelInfo.contextLimit / 1000).toFixed(0)}k tokens`}
               className="hidden md:flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-surface border border-purple-900/30 text-[10px] font-mono text-purple-300"
             >
               <Activity size={11} className={tokenUsagePercent > 80 ? 'text-red-400' : 'text-purple-400'} />
@@ -361,7 +479,7 @@ export default function App() {
             <button
               onClick={toggleMemory}
               title={useMemory ? 'Memória de todo o chat ATIVA' : 'Memória do chat DESATIVADA'}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition border ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition border cursor-pointer ${
                 useMemory
                   ? 'bg-purple-950/60 text-purple-300 border-purple-500/40'
                   : 'bg-surface text-gray-500 border-gray-800 hover:text-gray-300'
@@ -375,7 +493,7 @@ export default function App() {
               <button
                 onClick={() => handleDuplicateChat(activeChatId)}
                 title="Ramificar esta conversa"
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-medium text-gray-400 hover:text-purple-200 bg-surface border border-purple-950/30 hover:bg-surfaceHover transition"
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-medium text-gray-400 hover:text-purple-200 bg-surface border border-purple-950/30 hover:bg-surfaceHover transition cursor-pointer"
               >
                 <Copy size={13} />
                 <span>Duplicar</span>
@@ -384,7 +502,7 @@ export default function App() {
 
             <button
               onClick={() => setShowSystemPrompt(!showSystemPrompt)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition border ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition border cursor-pointer ${
                 showSystemPrompt || systemInstruction
                   ? 'bg-purple-600/20 text-purple-300 border-purple-500/30'
                   : 'text-gray-400 hover:text-white bg-surface border-purple-950/30'
@@ -406,7 +524,7 @@ export default function App() {
               value={systemInstruction}
               onChange={(e) => handleUpdateSystemInstruction(e.target.value)}
               placeholder="Ex: Aja como um arquiteto especialista em Rust e TypeScript..."
-              className="w-full bg-background border border-purple-900/40 rounded-xl p-2.5 text-xs text-white focus:outline-none focus:border-purple-500 resize-none"
+              className="w-full bg-background border border-purple-900/40 rounded-xl p-2.5 text-xs text-white focus:outline-none focus:border-purple-500 resize-none font-mono"
             />
           </div>
         )}
@@ -418,27 +536,42 @@ export default function App() {
                 <Eye size={36} className="text-purple-400 animate-pulse" />
               </div>
               <p className="text-sm font-medium">Consulte qualquer inteligência pelo Esperto.</p>
-              <p className="text-xs text-gray-500 mt-1">Cole imagens ou anexe arquivos para análise multimodal.</p>
+              <p className="text-xs text-gray-500 mt-1">Cole imagens, PDFs, código ou textos longos para análise multimodal.</p>
             </div>
           ) : (
             messages.map((msg, index) => (
-              <ChatMessage key={index} role={msg.role} content={msg.content} attachments={msg.attachments} />
+              <ChatMessage
+                key={index}
+                role={msg.role}
+                content={msg.content}
+                attachments={msg.attachments}
+                onEdit={msg.role === 'user' ? (newText) => handleEditMessage(index, newText) : undefined}
+                onRetry={msg.role === 'model' && index === messages.length - 1 ? handleRetryLastMessage : undefined}
+              />
             ))
           )}
         </div>
 
-        {/* Área de Input com Suporte a Anexos e Ctrl+V */}
+        {/* Caixa de Entrada com Textarea */}
         <div className="p-4 bg-surface/40 border-t border-purple-950/30">
-          <form onSubmit={handleSendMessage} className="max-w-4xl mx-auto flex flex-col gap-2">
+          <form onSubmit={(e) => { e.preventDefault(); handleSendMessage(); }} className="max-w-4xl mx-auto flex flex-col gap-2">
             
-            {/* Lista de Prévia de Anexos */}
+            {/* Lista de Prévia de Anexos e Snippets */}
             {attachments.length > 0 && (
               <div className="flex flex-wrap gap-2 p-2 bg-surface/80 rounded-xl border border-purple-900/40">
                 {attachments.map((att, index) => (
-                  <div key={index} className="flex items-center gap-1.5 bg-background border border-purple-800/40 px-2.5 py-1 rounded-lg text-xs text-purple-200">
-                    {att.mimeType.startsWith('image/') ? <ImageIcon size={13} className="text-purple-400" /> : <FileText size={13} className="text-purple-400" />}
-                    <span className="truncate max-w-[120px]">{att.name}</span>
-                    <button type="button" onClick={() => removeAttachment(index)} className="hover:text-red-400 transition p-0.5">
+                  <div key={index} className="flex items-center gap-1.5 bg-background border border-purple-800/40 px-2.5 py-1 rounded-lg text-xs text-purple-200 shadow-sm">
+                    {att.mimeType.startsWith('image/') ? (
+                      <ImageIcon size={13} className="text-purple-400" />
+                    ) : (
+                      <FileText size={13} className="text-purple-400" />
+                    )}
+                    <span className="truncate max-w-[150px] font-mono text-[11px]">{att.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeAttachment(index)}
+                      className="hover:text-red-400 transition p-0.5 cursor-pointer ml-1"
+                    >
                       <X size={12} />
                     </button>
                   </div>
@@ -446,7 +579,7 @@ export default function App() {
               </div>
             )}
 
-            <div className="flex gap-2">
+            <div className="flex items-end gap-2 bg-surface border border-purple-900/40 focus-within:border-purple-500 rounded-2xl p-2 transition shadow-inner">
               <input
                 type="file"
                 ref={fileInputRef}
@@ -459,28 +592,41 @@ export default function App() {
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 title="Anexar imagens ou documentos (ou cole com Ctrl+V)"
-                className="p-3 bg-surface border border-purple-900/40 hover:border-purple-500 text-purple-300 rounded-xl transition flex items-center justify-center shrink-0"
+                className="p-2.5 hover:bg-surfaceHover text-purple-300 rounded-xl transition flex items-center justify-center shrink-0 cursor-pointer"
               >
                 <Paperclip size={18} />
               </button>
 
-              <input
-                type="text"
+              <textarea
+                ref={textareaRef}
+                rows={1}
                 value={inputMessage}
                 onChange={(e) => setInputMessage(e.target.value)}
+                onKeyDown={handleKeyDown}
                 onPaste={handlePaste}
-                placeholder="Pergunte ao Oráculo... (Cole prints ou arraste arquivos)"
-                disabled={isLoading}
-                className="flex-1 bg-surface border border-purple-900/40 focus:border-purple-500 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-500 focus:outline-none transition disabled:opacity-50 shadow-inner"
+                placeholder="Pergunte ao Oráculo... (Enter para enviar, Ctrl+Enter para nova linha)"
+                className="flex-1 bg-transparent px-2 py-2 text-sm text-white placeholder-gray-500 focus:outline-none resize-none max-h-44 min-h-[38px] leading-relaxed"
               />
 
-              <button
-                type="submit"
-                disabled={isLoading || (!inputMessage.trim() && attachments.length === 0)}
-                className="bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 disabled:opacity-40 text-white p-3 rounded-xl transition flex items-center justify-center shrink-0 shadow-lg shadow-purple-950/50"
-              >
-                <Send size={18} />
-              </button>
+              {isLoading ? (
+                <button
+                  type="button"
+                  onClick={handleStopGeneration}
+                  className="bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/40 p-2.5 rounded-xl transition flex items-center justify-center shrink-0 cursor-pointer"
+                  title="Parar resposta"
+                >
+                  <Square size={16} fill="currentColor" />
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={!inputMessage.trim() && attachments.length === 0}
+                  className="bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 disabled:opacity-40 text-white p-2.5 rounded-xl transition flex items-center justify-center shrink-0 shadow-lg shadow-purple-950/50 cursor-pointer"
+                  title="Enviar mensagem (Enter)"
+                >
+                  <Send size={16} />
+                </button>
+              )}
             </div>
           </form>
         </div>
