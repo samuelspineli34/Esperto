@@ -1,5 +1,6 @@
-import React from 'react';
-import { X, Sparkles, Download, CheckCircle2, RefreshCw } from 'lucide-react';
+import React, { useState } from 'react';
+import { X, Sparkles, Download, CheckCircle2, RefreshCw, Copy, Check, ExternalLink } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
 import { ReleaseInfo, CURRENT_VERSION } from '../services/updater';
 
 interface Props {
@@ -17,19 +18,32 @@ export const UpdateModal: React.FC<Props> = ({
   release,
   onCheckAgain,
 }) => {
+  const [copied, setCopied] = useState(false);
+  const [isOpening, setIsOpening] = useState(false);
+
   if (!isOpen) return null;
 
   const handleDownload = async () => {
     if (!release?.htmlUrl) return;
 
     try {
-      // Tenta abrir via plugin nativo do Tauri
-      const { openUrl } = await import('@tauri-apps/plugin-opener');
-      await openUrl(release.htmlUrl);
-    } catch {
-      // Fallback para navegador web padrão
-      window.open(release.htmlUrl, '_blank', 'noopener,noreferrer');
+      setIsOpening(true);
+      // Chama o comando nativo do Rust
+      await invoke('open_url', { url: release.htmlUrl });
+    } catch (err) {
+      console.error('Erro ao abrir link:', err);
+      window.open(release.htmlUrl, '_blank');
+    } finally {
+      setIsOpening(false);
     }
+  };
+
+  const handleCopyLink = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!release?.htmlUrl) return;
+    navigator.clipboard.writeText(release.htmlUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2500);
   };
 
   return (
@@ -37,7 +51,7 @@ export const UpdateModal: React.FC<Props> = ({
       <div className="bg-surface border border-purple-900/40 rounded-3xl w-full max-w-md p-6 relative shadow-2xl shadow-purple-950/80">
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 text-gray-400 hover:text-white p-1 rounded-lg hover:bg-surfaceHover transition"
+          className="absolute top-4 right-4 text-gray-400 hover:text-white p-1 rounded-lg hover:bg-surfaceHover transition cursor-pointer"
         >
           <X size={18} />
         </button>
@@ -61,10 +75,19 @@ export const UpdateModal: React.FC<Props> = ({
           <div className="space-y-4">
             <div className="p-3.5 rounded-2xl bg-purple-950/40 border border-purple-500/30 flex items-start gap-3">
               <Sparkles size={20} className="text-purple-400 shrink-0 mt-0.5" />
-              <div>
-                <h3 className="text-sm font-semibold text-purple-200">
-                  Nova versão disponível: {release.tagName}
-                </h3>
+              <div className="flex-1">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-purple-200">
+                    Nova versão: {release.tagName}
+                  </h3>
+                  <button
+                    onClick={handleCopyLink}
+                    className="text-[11px] text-purple-400 hover:text-purple-300 flex items-center gap-1 font-mono cursor-pointer"
+                  >
+                    {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                    <span>{copied ? 'Copiado!' : 'Copiar Link'}</span>
+                  </button>
+                </div>
                 <p className="text-[11px] text-gray-400 mt-0.5">Lançada em {release.publishedAt}</p>
               </div>
             </div>
@@ -76,13 +99,14 @@ export const UpdateModal: React.FC<Props> = ({
               </p>
             </div>
 
-            {/* Botão com clique nativo */}
             <button
               onClick={handleDownload}
-              className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white font-semibold py-2.5 rounded-xl transition text-sm shadow-lg shadow-purple-950/60 cursor-pointer"
+              disabled={isOpening}
+              className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white font-semibold py-2.5 rounded-xl transition text-sm shadow-lg shadow-purple-950/60 cursor-pointer disabled:opacity-60"
             >
               <Download size={16} />
               <span>Baixar Atualização ({release.tagName})</span>
+              <ExternalLink size={14} className="opacity-70" />
             </button>
           </div>
         ) : (

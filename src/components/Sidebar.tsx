@@ -144,7 +144,7 @@ export const Sidebar: React.FC<Props> = ({
           className="w-full flex items-center gap-2 text-gray-400 hover:text-purple-200 p-2 rounded-xl hover:bg-surfaceHover transition text-sm cursor-pointer"
         >
           <SettingsIcon size={17} />
-          <span>Configurações do Oráculo</span>
+          <span>Configurações</span>
         </button>
 
         <div className="px-2 pt-1 flex items-center justify-between text-[10px] text-gray-500 font-mono select-none">

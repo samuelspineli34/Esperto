@@ -371,7 +371,7 @@ export default function App() {
       }
     } catch (err: any) {
       if (!abortControllerRef.current?.signal.aborted) {
-        const errorMessage = `Erro: ${err.message || 'Falha na resposta do Oráculo.'}`;
+        const errorMessage = `Erro: ${err.message || 'Falha na resposta do Esperto.'}`;
         
         setMessages((prev) => {
           const updated = [...prev];
@@ -586,7 +586,7 @@ export default function App() {
                 <Eye size={18} className="text-purple-400" />
               </div>
               <div className="flex items-center gap-2 text-xs font-mono">
-                <span className="animate-pulse">Consultando Oráculo...</span>
+                <span className="animate-pulse">Consultando Esperto...</span>
                 <span className="text-purple-400 font-bold">({elapsedTime.toFixed(1)}s)</span>
               </div>
             </div>
@@ -630,7 +630,7 @@ export default function App() {
               </div>
             )}
 
-            <div className="flex items-end gap-2 bg-surface border border-purple-900/40 focus-within:border-purple-500 rounded-2xl p-2 transition shadow-inner">
+            <div className="bg-surface border border-purple-900/40 focus-within:border-purple-500 rounded-2xl p-3 transition shadow-inner flex flex-col gap-2">
               <input
                 type="file"
                 ref={fileInputRef}
@@ -639,45 +639,54 @@ export default function App() {
                 className="hidden"
               />
 
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                title="Anexar imagens ou documentos (ou cole com Ctrl+V)"
-                className="p-2.5 hover:bg-surfaceHover text-purple-300 rounded-xl transition flex items-center justify-center shrink-0 cursor-pointer"
-              >
-                <Paperclip size={18} />
-              </button>
-
+              {/* Área de Texto Expandida */}
               <textarea
                 ref={textareaRef}
-                rows={1}
+                rows={3}
                 value={inputMessage}
                 onChange={(e) => setInputMessage(e.target.value)}
                 onKeyDown={handleKeyDown}
                 onPaste={handlePaste}
-                placeholder="Pergunte ao Oráculo... (Enter para enviar, Ctrl+Enter para nova linha)"
-                className="flex-1 bg-transparent px-2 py-2 text-sm text-white placeholder-gray-500 focus:outline-none resize-none max-h-44 min-h-[38px] leading-relaxed"
+                placeholder="Pergunte ao Esperto... (Enter para enviar, Ctrl+Enter para nova linha)"
+                className="w-full bg-transparent px-1 pt-1 text-sm text-white placeholder-gray-500 focus:outline-none resize-y min-h-[70px] max-h-96 leading-relaxed font-sans"
               />
 
-              {isLoading ? (
-                <button
-                  type="button"
-                  onClick={handleStopGeneration}
-                  className="bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/40 p-2.5 rounded-xl transition flex items-center justify-center shrink-0 cursor-pointer"
-                  title="Parar resposta"
-                >
-                  <Square size={16} fill="currentColor" />
-                </button>
-              ) : (
-                <button
-                  type="submit"
-                  disabled={(!inputMessage.trim() && attachments.length === 0) || isTokenLimitExceeded}
-                  className="bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 disabled:opacity-40 text-white p-2.5 rounded-xl transition flex items-center justify-center shrink-0 shadow-lg shadow-purple-950/50 cursor-pointer"
-                  title="Enviar mensagem (Enter)"
-                >
-                  <Send size={16} />
-                </button>
-              )}
+              {/* Barra Inferior com Ações Alinhadas */}
+              <div className="flex items-center justify-between pt-1 border-t border-purple-950/20 select-none">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    title="Anexar imagens ou documentos (ou cole com Ctrl+V)"
+                    className="p-1.5 hover:bg-surfaceHover text-purple-400 hover:text-purple-300 rounded-lg transition flex items-center justify-center cursor-pointer"
+                  >
+                    <Paperclip size={18} />
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {isLoading ? (
+                    <button
+                      type="button"
+                      onClick={handleStopGeneration}
+                      className="bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/40 px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer text-xs font-semibold"
+                      title="Parar resposta"
+                    >
+                      <Square size={13} fill="currentColor" />
+                      <span>Parar</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="submit"
+                      disabled={(!inputMessage.trim() && attachments.length === 0) || isTokenLimitExceeded}
+                      className="bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 disabled:opacity-40 text-white p-2 rounded-xl transition flex items-center justify-center shadow-md shadow-purple-950/50 cursor-pointer"
+                      title="Enviar mensagem (Enter)"
+                    >
+                      <Send size={15} />
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
           </form>
         </div>
