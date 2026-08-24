@@ -124,5 +124,5 @@ Distribuído sob a licença **MIT**. Consulte o arquivo [`LICENSE`](LICENSE) par
 ---
 
 <div align="center">
-Desenvolvido por <a href="https://github.com/samuelspineli34">Samuel Spineli</a> • 2026
+Desenvolvido por <a href="https://www.linkedin.com/in/samuel-spineli/">Samuel Spineli</a> • 2026
 </div>
