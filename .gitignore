@@ -1,0 +1,43 @@
+# Dependências do Node / Frontend
+node_modules/
+.pnp/
+.pnp.js
+dist/
+dist-ssr/
+build/
+*.local
+
+# Compilação e Binários do Tauri / Rust
+src-tauri/target/
+src-tauri/gen/
+**/*.rs.bk
+*.pdb
+
+# Banco de dados e armazenamento local (privacidade dos chats)
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+data/
+storage/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Variáveis de Ambiente e Chaves Secretas
+.env
+.env.*
+!.env.example
+
+# IDEs e Sistema Operacional
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
