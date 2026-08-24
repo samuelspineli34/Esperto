@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🧠 Esperto
+# Esperto
 
 **Um cliente desktop ultrarrápido, leve e elegante para o Google Gemini.**
 
