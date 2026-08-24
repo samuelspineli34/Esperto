@@ -1,15 +1,19 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import pkg from './package.json';
 
 export default defineConfig({
   plugins: [react()],
+  define: {
+    __APP_VERSION__: JSON.stringify(process.env.APP_VERSION || `v${pkg.version}`),
+  },
   clearScreen: false,
   server: {
     port: 5173,
     strictPort: true,
-    host: true, // Garante que o WSL consiga se comunicar perfeitamente
+    host: true,
     watch: {
-      usePolling: true, // Garante que o hot-reload funcione no WSL
+      usePolling: true,
     },
   },
 });

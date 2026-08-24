@@ -8,9 +8,6 @@ on:
 permissions:
   contents: write
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   # 1. Cria a tag de versão e a Release no GitHub
   create-release:
@@ -43,7 +40,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # 2. Compila simultaneamente para Windows, Linux e Mac
+  # 2. Compila simultaneamente para Windows, Linux e Mac com a versão injetada
   build-binaries:
     needs: create-release
     strategy:
@@ -78,8 +75,32 @@ jobs:
       - name: Instalar Dependências do Projeto
         run: npm install
 
+      # INJETA A VERSÃO DINÂMICA NO PACKAGE.JSON E TAURI.CONF.JSON
+      - name: Sincronizar Versão Dinâmica
+        shell: bash
+        run: |
+          TAG="${{ needs.create-release.outputs.new_version }}"
+          CLEAN_VERSION="${TAG#v}"
+          echo "Injetando versao: $CLEAN_VERSION (Tag: $TAG)"
+
+          # Atualiza package.json
+          npm version "$CLEAN_VERSION" --no-git-tag-version --allow-same-version
+
+          # Atualiza tauri.conf.json
+          node -e "
+            const fs = require('fs');
+            const path = './src-tauri/tauri.conf.json';
+            const conf = JSON.parse(fs.readFileSync(path, 'utf8'));
+            conf.version = '$CLEAN_VERSION';
+            fs.writeFileSync(path, JSON.stringify(conf, null, 2));
+          "
+        env:
+          APP_VERSION: ${{ needs.create-release.outputs.new_version }}
+
       - name: Compilar App Desktop (Tauri)
         run: npx tauri build
+        env:
+          APP_VERSION: ${{ needs.create-release.outputs.new_version }}
 
       # Anexa os instaladores gerados diretamente na Release criada
       - name: Anexar Instaladores na Release

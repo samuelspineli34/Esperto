@@ -8,12 +8,11 @@ export interface ReleaseInfo {
   hasUpdate: boolean;
 }
 
-// Defina a versão atual do seu app
-export const CURRENT_VERSION = 'v0.1.0';
+// Pega a versão injetada no momento do build (ex: v0.1.1, v0.1.2)
+export const CURRENT_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'v0.1.0';
 const REPO_OWNER = 'samuelspineli34';
 const REPO_NAME = 'Esperto';
 
-// Compara semanticamente duas versões (ex: v0.1.1 > v0.1.0, mas v0.0.8 < v0.1.0)
 function isNewerVersion(latest: string, current: string): boolean {
   const lParts = latest.replace(/^v/, '').split('.').map((n) => parseInt(n, 10) || 0);
   const cParts = current.replace(/^v/, '').split('.').map((n) => parseInt(n, 10) || 0);
