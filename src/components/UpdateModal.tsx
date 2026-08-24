@@ -19,6 +19,19 @@ export const UpdateModal: React.FC<Props> = ({
 }) => {
   if (!isOpen) return null;
 
+  const handleDownload = async () => {
+    if (!release?.htmlUrl) return;
+
+    try {
+      // Tenta abrir via plugin nativo do Tauri
+      const { openUrl } = await import('@tauri-apps/plugin-opener');
+      await openUrl(release.htmlUrl);
+    } catch {
+      // Fallback para navegador web padrão
+      window.open(release.htmlUrl, '_blank', 'noopener,noreferrer');
+    }
+  };
+
   return (
     <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
       <div className="bg-surface border border-purple-900/40 rounded-3xl w-full max-w-md p-6 relative shadow-2xl shadow-purple-950/80">
@@ -58,20 +71,19 @@ export const UpdateModal: React.FC<Props> = ({
 
             <div className="bg-background/60 border border-purple-900/30 rounded-xl p-3 max-h-40 overflow-y-auto">
               <span className="text-[11px] font-semibold text-purple-300 block mb-1">Notas da Versão:</span>
-              <p className="text-xs text-gray-300 whitespace-pre-wrap leading-relaxed">
+              <p className="text-xs text-gray-300 whitespace-pre-wrap leading-relaxed font-mono">
                 {release.body}
               </p>
             </div>
 
-            <a
-              href={release.htmlUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white font-semibold py-2.5 rounded-xl transition text-sm shadow-lg shadow-purple-950/60"
+            {/* Botão com clique nativo */}
+            <button
+              onClick={handleDownload}
+              className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white font-semibold py-2.5 rounded-xl transition text-sm shadow-lg shadow-purple-950/60 cursor-pointer"
             >
               <Download size={16} />
               <span>Baixar Atualização ({release.tagName})</span>
-            </a>
+            </button>
           </div>
         ) : (
           <div className="py-6 flex flex-col items-center justify-center text-center space-y-3">
@@ -82,7 +94,7 @@ export const UpdateModal: React.FC<Props> = ({
             </div>
             <button
               onClick={onCheckAgain}
-              className="mt-2 text-xs font-medium text-purple-300 hover:text-purple-200 bg-surface border border-purple-900/40 px-3 py-1.5 rounded-xl hover:bg-surfaceHover transition"
+              className="mt-2 text-xs font-medium text-purple-300 hover:text-purple-200 bg-surface border border-purple-900/40 px-3 py-1.5 rounded-xl hover:bg-surfaceHover transition cursor-pointer"
             >
               Verificar Novamente
             </button>
