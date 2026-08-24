@@ -10,6 +10,7 @@ export interface StreamOptions {
   settings: Settings;
   systemInstruction?: string;
   globalMemory?: string;
+  directoryContext?: string;
   history: Message[];
   newMessage: string;
   attachments?: Attachment[];
@@ -22,6 +23,7 @@ export async function* streamAIResponse({
   settings,
   systemInstruction,
   globalMemory,
+  directoryContext,
   history,
   newMessage,
   attachments = [],
@@ -32,8 +34,14 @@ export async function* streamAIResponse({
   const relevantHistory = useMemory ? history : [];
 
   let finalSystemInstruction = systemInstruction || 'Você é o Esperto, uma entidade oracular de inteligência e sabedoria.';
+  
   if (globalMemory && globalMemory.trim()) {
     finalSystemInstruction += `\n\n[MEMÓRIA GLOBAL DO USUÁRIO]:\n${globalMemory.trim()}`;
+  }
+
+  // Anexa o conteúdo de todos os arquivos da pasta
+  if (directoryContext && directoryContext.trim()) {
+    finalSystemInstruction += `\n\n[BASE DE CONHECIMENTO DO DIRETÓRIO LOCAL]:\n${directoryContext.trim()}`;
   }
 
   if (provider === 'gemini') {

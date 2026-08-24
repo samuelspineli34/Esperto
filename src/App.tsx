@@ -7,7 +7,8 @@ import { ChatMessage } from './components/ChatMessage';
 import { SettingsModal } from './components/SettingsModal';
 import { UpdateModal } from './components/UpdateModal';
 import { checkForUpdates, ReleaseInfo } from './services/updater';
-import { Send, Sliders, Eye, Brain, Copy, Paperclip, X, FileText, Image as ImageIcon, Activity, Square, Timer, Gift, DollarSign, AlertCircle } from 'lucide-react';
+import { Send, Sliders, Eye, Brain, Copy, Paperclip, X, FileText, Image as ImageIcon, Activity, Square, Timer, Folder, FolderCheck, FolderSync, Plus, Trash2 } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
 
 const defaultSettings: Settings = {
   id: 'default',
@@ -19,6 +20,11 @@ const defaultSettings: Settings = {
   mediaResolution: 'default',
   googleSearch: false,
 };
+
+interface LoadedFile {
+  path: string;
+  content: string;
+}
 
 export default function App() {
   const [chats, setChats] = useState<Chat[]>([]);
@@ -38,6 +44,13 @@ export default function App() {
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [latestRelease, setLatestRelease] = useState<ReleaseInfo | null>(null);
 
+  // Múltiplos Diretórios
+  const [directoryPaths, setDirectoryPaths] = useState<string[]>([]);
+  const [newDirPath, setNewDirPath] = useState('');
+  const [allLoadedFiles, setAllLoadedFiles] = useState<LoadedFile[]>([]);
+  const [showDirectoryDrawer, setShowDirectoryDrawer] = useState(false);
+  const [loadingDirectories, setLoadingDirectories] = useState(false);
+
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -45,7 +58,7 @@ export default function App() {
 
   const modelInfo = useMemo(() => getModelInfo(settings.model || 'gemini-3.7-flash'), [settings.model]);
 
-  // Cronômetro em tempo real durante a resposta
+  // Cronômetro
   useEffect(() => {
     let interval: any;
     if (isLoading) {
@@ -58,20 +71,16 @@ export default function App() {
     return () => clearInterval(interval);
   }, [isLoading]);
 
-  // Contagem de tokens em tempo real
+  // Contagem de tokens
   const totalEstimatedTokens = useMemo(() => {
     let charCount = (settings.globalMemory || '').length + (systemInstruction || '').length;
     messages.forEach((m) => {
       charCount += m.content.length;
-      if (m.attachments) {
-        m.attachments.forEach((a) => (charCount += a.data.length * 0.1));
-      }
+      if (m.attachments) m.attachments.forEach((a) => (charCount += a.data.length * 0.1));
     });
     charCount += inputMessage.length;
     return Math.ceil(charCount / 3.8);
   }, [messages, inputMessage, systemInstruction, settings.globalMemory]);
-
-  const isTokenLimitExceeded = totalEstimatedTokens >= modelInfo.contextLimit;
 
   const tokenUsagePercent = useMemo(() => {
     return Math.min(100, Math.round((totalEstimatedTokens / modelInfo.contextLimit) * 1000) / 10);
@@ -80,20 +89,14 @@ export default function App() {
   useEffect(() => {
     const loadInitialData = async () => {
       const savedSettings = await db.settings.get('default');
-      if (savedSettings) {
-        setSettings(savedSettings);
-      } else {
-        await db.settings.put(defaultSettings);
-      }
+      if (savedSettings) setSettings(savedSettings);
+      else await db.settings.put(defaultSettings);
 
       const allChats = await db.chats.orderBy('createdAt').reverse().toArray();
       setChats(allChats);
 
-      if (allChats.length > 0) {
-        setActiveChatId(allChats[0].id);
-      } else {
-        createNewChat();
-      }
+      if (allChats.length > 0) setActiveChatId(allChats[0].id);
+      else createNewChat();
     };
     loadInitialData();
   }, []);
@@ -101,6 +104,8 @@ export default function App() {
   useEffect(() => {
     if (!activeChatId) {
       setMessages([]);
+      setDirectoryPaths([]);
+      setAllLoadedFiles([]);
       return;
     }
 
@@ -109,6 +114,10 @@ export default function App() {
       if (activeChat) {
         setSystemInstruction(activeChat.systemInstruction || '');
         setUseMemory(activeChat.useMemory !== false);
+        const paths = activeChat.directoryPaths || [];
+        setDirectoryPaths(paths);
+        if (paths.length > 0) syncDirectories(paths);
+        else setAllLoadedFiles([]);
       }
 
       const chatMessages = await db.messages
@@ -128,11 +137,101 @@ export default function App() {
     });
   }, [messages, isLoading]);
 
+  // Sincroniza todas as pastas configuradas
+  const syncDirectories = async (paths: string[]) => {
+    const validPaths = paths.filter((p) => p.trim().length > 0);
+    if (validPaths.length === 0) {
+      setAllLoadedFiles([]);
+      return;
+    }
+
+    setLoadingDirectories(true);
+    try {
+      const files = await invoke<LoadedFile[]>('read_multiple_directories', {
+        dirPaths: validPaths,
+      });
+      setAllLoadedFiles(files);
+      if (activeChatId) {
+        await db.chats.update(activeChatId, { directoryPaths: validPaths });
+      }
+    } catch (err: any) {
+      console.warn('Erro ao ler pastas:', err);
+    } finally {
+      setLoadingDirectories(false);
+    }
+  };
+
+  const handleAddDirectory = () => {
+    if (!newDirPath.trim()) return;
+    const updated = Array.from(new Set([...directoryPaths, newDirPath.trim()]));
+    setDirectoryPaths(updated);
+    setNewDirPath('');
+    syncDirectories(updated);
+  };
+
+  const handleRemoveDirectory = (pathToRemove: string) => {
+    const updated = directoryPaths.filter((p) => p !== pathToRemove);
+    setDirectoryPaths(updated);
+    syncDirectories(updated);
+  };
+
+  // Monta o contexto inteligente limitando a um orçamento seguro de 150k tokens
+  const buildSmartDirectoryContext = (query: string, files: LoadedFile[]): string => {
+    if (files.length === 0) return '';
+
+    // 1. Árvore estrutural completa de todos os arquivos
+    let manifest = `=== ESTRUTURA DO PROJETO (${files.length} arquivos) ===\n`;
+    files.forEach((f) => {
+      manifest += `• ${f.path}\n`;
+    });
+    manifest += '\n';
+
+    // 2. Pontuação dos arquivos por relevância com a pergunta do usuário
+    const terms = query.toLowerCase().split(/\s+/).filter((t) => t.length > 2);
+    const scoredFiles = files.map((f) => {
+      let score = 0;
+      const lowerPath = f.path.toLowerCase();
+      const lowerContent = f.content.toLowerCase();
+
+      // Arquivos de entrada e configuração sempre têm prioridade base
+      if (lowerPath.includes('package.json') || lowerPath.includes('cargo.toml') || lowerPath.includes('readme.md')) {
+        score += 5;
+      }
+
+      terms.forEach((term) => {
+        if (lowerPath.includes(term)) score += 15;
+        const matches = (lowerContent.match(new RegExp(term, 'g')) || []).length;
+        score += Math.min(matches, 10);
+      });
+
+      return { ...f, score };
+    });
+
+    // Ordena os mais relevantes primeiro
+    scoredFiles.sort((a, b) => b.score - a.score);
+
+    // 3. Empacota os arquivos até atingir no máximo ~500.000 caracteres (~130k tokens de segurança)
+    const MAX_CHARS_BUDGET = 500000;
+    let accumulatedChars = manifest.length;
+    let includedCount = 0;
+    let filesContent = '';
+
+    for (const f of scoredFiles) {
+      if (accumulatedChars + f.content.length > MAX_CHARS_BUDGET) break;
+      filesContent += `=== ARQUIVO: ${f.path} ===\n${f.content}\n\n`;
+      accumulatedChars += f.content.length;
+      includedCount++;
+    }
+
+    return `${manifest}=== CONTEÚDO DOS ARQUIVOS RELEVANTES (${includedCount} de ${files.length} incluídos para respeitar o limite de cota) ===\n\n${filesContent}`;
+  };
+
   const createNewChat = async () => {
     const newChat: Chat = {
       id: crypto.randomUUID(),
       title: 'Nova Consulta',
       systemInstruction: '',
+      directoryPaths: [],
       useMemory: true,
       createdAt: Date.now(),
     };
@@ -140,6 +239,8 @@ export default function App() {
     setChats((prev) => [newChat, ...prev]);
     setActiveChatId(newChat.id);
     setMessages([]);
+    setDirectoryPaths([]);
+    setAllLoadedFiles([]);
   };
 
   const handleDuplicateChat = async (sourceChatId: string, e?: React.MouseEvent) => {
@@ -152,6 +253,7 @@ export default function App() {
       id: newChatId,
       title: `${sourceChat.title} (Ramo)`,
       systemInstruction: sourceChat.systemInstruction || '',
+      directoryPaths: sourceChat.directoryPaths || [],
       useMemory: sourceChat.useMemory !== false,
       createdAt: Date.now(),
     };
@@ -191,11 +293,8 @@ export default function App() {
     setChats(updatedChats);
 
     if (activeChatId === id) {
-      if (updatedChats.length > 0) {
-        setActiveChatId(updatedChats[0].id);
-      } else {
-        createNewChat();
-      }
+      if (updatedChats.length > 0) setActiveChatId(updatedChats[0].id);
+      else createNewChat();
     }
   };
 
@@ -246,9 +345,7 @@ export default function App() {
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
-    for (let i = 0; i < files.length; i++) {
-      addFile(files[i]);
-    }
+    for (let i = 0; i < files.length; i++) addFile(files[i]);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -290,13 +387,23 @@ export default function App() {
   };
 
   const handleSendMessage = async (customMessageText?: string, baseHistory?: Message[]) => {
-    if (isTokenLimitExceeded) {
-      alert(`Limite de tokens do modelo atingido (${totalEstimatedTokens.toLocaleString()} de ${modelInfo.contextLimit.toLocaleString()}). Limpe mensagens antigas ou selecione um modelo com contexto maior.`);
-      return;
-    }
-
     const textToSend = customMessageText !== undefined ? customMessageText : inputMessage;
     if ((!textToSend.trim() && attachments.length === 0) || isLoading || !activeChatId) return;
+
+    // AUTO-SYNC: Lê todas as pastas e seleciona o contexto ideal antes de enviar
+    let currentFiles = allLoadedFiles;
+    if (directoryPaths.length > 0) {
+      try {
+        currentFiles = await invoke<LoadedFile[]>('read_multiple_directories', {
+          dirPaths: directoryPaths,
+        });
+        setAllLoadedFiles(currentFiles);
+      } catch (e) {
+        console.warn('Erro ao auto-sincronizar:', e);
+      }
+    }
+
+    const smartContext = buildSmartDirectoryContext(textToSend, currentFiles);
 
     const currentInput = textToSend;
     const currentAttachments = [...attachments];
@@ -342,6 +449,7 @@ export default function App() {
         settings,
         systemInstruction,
         globalMemory: settings.globalMemory,
+        directoryContext: smartContext, // <--- Contexto inteligente respeitando o limite
         history: currentMessages.slice(0, -1),
         newMessage: currentMessages[currentMessages.length - 1]?.content || currentInput,
         attachments: currentAttachments,
@@ -372,7 +480,6 @@ export default function App() {
     } catch (err: any) {
       if (!abortControllerRef.current?.signal.aborted) {
         const errorMessage = `Erro: ${err.message || 'Falha na resposta do Esperto.'}`;
-        
         setMessages((prev) => {
           const updated = [...prev];
           updated[updated.length - 1] = {
@@ -397,12 +504,10 @@ export default function App() {
 
   const handleEditMessage = async (index: number, newContent: string) => {
     if (!activeChatId) return;
-
     const messagesToDelete = messages.slice(index);
     for (const msg of messagesToDelete) {
       if (msg.id) await db.messages.delete(msg.id);
     }
-
     const historyBefore = messages.slice(0, index);
     setMessages(historyBefore);
     handleSendMessage(newContent, historyBefore);
@@ -410,15 +515,12 @@ export default function App() {
 
   const handleRetryLastMessage = async () => {
     if (messages.length === 0 || isLoading) return;
-
     const lastMsg = messages[messages.length - 1];
     if (lastMsg.role === 'model' && lastMsg.id) {
       await db.messages.delete(lastMsg.id);
     }
-
     const historyWithoutLastModel = messages.filter((_, idx) => idx !== messages.length - 1);
     setMessages(historyWithoutLastModel);
-
     const lastUserMsg = historyWithoutLastModel[historyWithoutLastModel.length - 1];
     if (lastUserMsg) {
       handleSendMessage(lastUserMsg.content, historyWithoutLastModel.slice(0, -1));
@@ -463,7 +565,6 @@ export default function App() {
               ESPERTO
             </span>
             
-            {/* Badge do Modelo com Selo Grátis/Pago */}
             <button
               onClick={() => setIsSettingsOpen(true)}
               className="text-[10px] font-semibold bg-purple-950/80 hover:bg-purple-900/80 text-purple-300 px-2.5 py-0.5 rounded-full border border-purple-800/40 transition cursor-pointer flex items-center gap-1.5"
@@ -476,25 +577,18 @@ export default function App() {
               )}
             </button>
 
-            {/* Contador e Medidor de Contexto */}
+            {/* Contador de Contexto */}
             <div
-              title={`Contexto estimado: ${totalEstimatedTokens.toLocaleString()} de ${(modelInfo.contextLimit / 1000).toFixed(0)}k tokens`}
-              className={`hidden md:flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-[10px] font-mono ${
-                isTokenLimitExceeded
-                  ? 'bg-red-950/80 border-red-500 text-red-300 animate-pulse'
-                  : tokenUsagePercent > 80
-                  ? 'bg-amber-950/60 border-amber-500/50 text-amber-300'
-                  : 'bg-surface border-purple-900/30 text-purple-300'
-              }`}
+              title={`Contexto: ${totalEstimatedTokens.toLocaleString()} de ${(modelInfo.contextLimit / 1000).toFixed(0)}k tokens`}
+              className="hidden md:flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-surface border border-purple-900/30 text-[10px] font-mono text-purple-300"
             >
-              <Activity size={11} className={isTokenLimitExceeded || tokenUsagePercent > 80 ? 'text-red-400' : 'text-purple-400'} />
+              <Activity size={11} className={tokenUsagePercent > 80 ? 'text-red-400' : 'text-purple-400'} />
               <span>{totalEstimatedTokens > 1000 ? `${(totalEstimatedTokens / 1000).toFixed(1)}k` : totalEstimatedTokens}</span>
               <span className="text-gray-500">/</span>
               <span className="text-gray-400">{modelInfo.contextLimit >= 1000000 ? '1.0M' : `${modelInfo.contextLimit / 1000}k`}</span>
               <span className="font-bold ml-0.5">({tokenUsagePercent}%)</span>
             </div>
 
-            {/* Cronômetro durante streaming */}
             {isLoading && (
               <div className="flex items-center gap-1 text-[11px] font-mono text-purple-300 bg-purple-950/70 border border-purple-500/40 px-2 py-0.5 rounded-full animate-pulse">
                 <Timer size={11} />
@@ -539,8 +633,82 @@ export default function App() {
               <Sliders size={14} />
               <span>{systemInstruction ? 'Instruções Ativas' : 'Instruções'}</span>
             </button>
+
+            {/* Botão de Múltiplos Diretórios */}
+            <button
+              onClick={() => setShowDirectoryDrawer(!showDirectoryDrawer)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition border cursor-pointer ${
+                directoryPaths.length > 0
+                  ? 'bg-purple-950/80 text-purple-300 border-purple-500/50 shadow-sm'
+                  : 'text-gray-400 hover:text-white bg-surface border-purple-950/30'
+              }`}
+              title="Vincular pastas locais como base de conhecimento"
+            >
+              {directoryPaths.length > 0 ? <FolderCheck size={14} className="text-purple-400" /> : <Folder size={14} />}
+              <span>{directoryPaths.length > 0 ? `${directoryPaths.length} Pastas (${allLoadedFiles.length} arqs)` : 'Pastas Base'}</span>
+            </button>
           </div>
         </header>
+
+        {/* Gaveta de Gerenciamento de Múltiplos Diretórios */}
+        {showDirectoryDrawer && (
+          <div className="p-4 bg-surface border-b border-purple-950/40 transition space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-purple-200">
+                Pastas Locais Vinculadas a este Chat:
+              </label>
+              <span className="text-[11px] text-purple-300 font-mono">
+                {allLoadedFiles.length} arquivos indexados
+              </span>
+            </div>
+
+            {/* Lista de Pastas Adicionadas */}
+            {directoryPaths.length > 0 && (
+              <div className="space-y-1.5 max-h-36 overflow-y-auto">
+                {directoryPaths.map((path, idx) => (
+                  <div key={idx} className="flex items-center justify-between bg-background border border-purple-900/30 px-3 py-1.5 rounded-xl text-xs text-purple-200 font-mono">
+                    <span className="truncate flex-1 mr-2">{path}</span>
+                    <button
+                      onClick={() => handleRemoveDirectory(path)}
+                      className="text-gray-500 hover:text-red-400 transition p-1"
+                      title="Remover pasta"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Adicionar Nova Pasta */}
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={newDirPath}
+                onChange={(e) => setNewDirPath(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleAddDirectory()}
+                placeholder="Cole o caminho de uma pasta (ex: C:\MeuProjeto ou /home/samuel/app)"
+                className="flex-1 bg-background border border-purple-900/40 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500 font-mono"
+              />
+              <button
+                onClick={handleAddDirectory}
+                disabled={!newDirPath.trim()}
+                className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-xs font-semibold px-4 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <Plus size={14} />
+                <span>Adicionar</span>
+              </button>
+              <button
+                onClick={() => syncDirectories(directoryPaths)}
+                disabled={loadingDirectories || directoryPaths.length === 0}
+                className="bg-surface hover:bg-surfaceHover text-purple-300 border border-purple-900/40 text-xs font-semibold px-3 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <FolderSync size={14} className={loadingDirectories ? 'animate-spin' : ''} />
+                <span>Recarregar</span>
+              </button>
+            </div>
+          </div>
+        )}
 
         {showSystemPrompt && (
           <div className="p-4 bg-surface border-b border-purple-950/40 transition">
@@ -564,7 +732,7 @@ export default function App() {
                 <Eye size={36} className="text-purple-400 animate-pulse" />
               </div>
               <p className="text-sm font-medium">Consulte qualquer inteligência pelo Esperto.</p>
-              <p className="text-xs text-gray-500 mt-1">Cole imagens, PDFs, código ou textos longos para análise multimodal.</p>
+              <p className="text-xs text-gray-500 mt-1">Vincule pastas de código, cole imagens ou envie arquivos para análise multimodal.</p>
             </div>
           ) : (
             messages.map((msg, index) => (
@@ -579,7 +747,6 @@ export default function App() {
             ))
           )}
 
-          {/* Indicador pulsante durante resposta com cronômetro */}
           {isLoading && messages[messages.length - 1]?.content === '' && (
             <div className="flex items-center gap-3 p-5 text-purple-300 bg-surface/30 border-y border-purple-950/20">
               <div className="w-8 h-8 rounded-xl bg-purple-950 border border-purple-500/30 flex items-center justify-center animate-pulse">
@@ -592,17 +759,6 @@ export default function App() {
             </div>
           )}
         </div>
-
-        {/* Aviso de Limite de Tokens Ultrapassado */}
-        {isTokenLimitExceeded && (
-          <div className="bg-red-950/80 border-t border-red-800 px-4 py-2 flex items-center justify-between text-xs text-red-200">
-            <div className="flex items-center gap-2">
-              <AlertCircle size={15} className="text-red-400" />
-              <span>Limite de tokens atingido ({totalEstimatedTokens.toLocaleString()} / {modelInfo.contextLimit.toLocaleString()}).</span>
-            </div>
-            <span className="text-[11px] text-red-300">Troque o modelo nas configurações ou inicie um novo chat.</span>
-          </div>
-        )}
 
         {/* Caixa de Entrada */}
         <div className="p-4 bg-surface/40 border-t border-purple-950/30">
@@ -639,7 +795,6 @@ export default function App() {
                 className="hidden"
               />
 
-              {/* Área de Texto Expandida */}
               <textarea
                 ref={textareaRef}
                 rows={3}
@@ -651,7 +806,6 @@ export default function App() {
                 className="w-full bg-transparent px-1 pt-1 text-sm text-white placeholder-gray-500 focus:outline-none resize-y min-h-[70px] max-h-96 leading-relaxed font-sans"
               />
 
-              {/* Barra Inferior com Ações Alinhadas */}
               <div className="flex items-center justify-between pt-1 border-t border-purple-950/20 select-none">
                 <div className="flex items-center gap-1.5">
                   <button
@@ -678,7 +832,7 @@ export default function App() {
                   ) : (
                     <button
                       type="submit"
-                      disabled={(!inputMessage.trim() && attachments.length === 0) || isTokenLimitExceeded}
+                      disabled={!inputMessage.trim() && attachments.length === 0}
                       className="bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 disabled:opacity-40 text-white p-2 rounded-xl transition flex items-center justify-center shadow-md shadow-purple-950/50 cursor-pointer"
                       title="Enviar mensagem (Enter)"
                     >

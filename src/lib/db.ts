@@ -12,6 +12,7 @@ export interface Chat {
   id: string;
   title: string;
   systemInstruction?: string;
+  directoryPaths?: string[];
   useMemory?: boolean;
   model?: string;
   createdAt: number;
