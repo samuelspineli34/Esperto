@@ -93,4 +93,3 @@ Para utilizar o app, gere uma chave de API gratuita no [Google AI Studio](https:
 ## Licença
 
 Distribuído sob a licença **MIT**. Veja o arquivo [`LICENSE`](LICENSE) para mais detalhes.
-```
