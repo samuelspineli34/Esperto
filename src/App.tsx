@@ -7,7 +7,7 @@ import { ChatMessage } from './components/ChatMessage';
 import { SettingsModal } from './components/SettingsModal';
 import { UpdateModal } from './components/UpdateModal';
 import { checkForUpdates, ReleaseInfo } from './services/updater';
-import { Send, Sliders, Eye, Brain, Copy, Paperclip, X, FileText, Image as ImageIcon, Activity, Square } from 'lucide-react';
+import { Send, Sliders, Eye, Brain, Copy, Paperclip, X, FileText, Image as ImageIcon, Activity, Square, Timer, Gift, DollarSign, AlertCircle } from 'lucide-react';
 
 const defaultSettings: Settings = {
   id: 'default',
@@ -32,6 +32,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settings, setSettings] = useState<Settings>(defaultSettings);
+  const [elapsedTime, setElapsedTime] = useState(0);
 
   const [isUpdateOpen, setIsUpdateOpen] = useState(false);
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
@@ -43,6 +44,19 @@ export default function App() {
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const modelInfo = useMemo(() => getModelInfo(settings.model || 'gemini-3.7-flash'), [settings.model]);
+
+  // Cronômetro em tempo real durante a resposta
+  useEffect(() => {
+    let interval: any;
+    if (isLoading) {
+      setElapsedTime(0);
+      const startTime = Date.now();
+      interval = setInterval(() => {
+        setElapsedTime(Math.floor((Date.now() - startTime) / 100) / 10);
+      }, 100);
+    }
+    return () => clearInterval(interval);
+  }, [isLoading]);
 
   // Contagem de tokens em tempo real
   const totalEstimatedTokens = useMemo(() => {
@@ -56,6 +70,8 @@ export default function App() {
     charCount += inputMessage.length;
     return Math.ceil(charCount / 3.8);
   }, [messages, inputMessage, systemInstruction, settings.globalMemory]);
+
+  const isTokenLimitExceeded = totalEstimatedTokens >= modelInfo.contextLimit;
 
   const tokenUsagePercent = useMemo(() => {
     return Math.min(100, Math.round((totalEstimatedTokens / modelInfo.contextLimit) * 1000) / 10);
@@ -166,7 +182,6 @@ export default function App() {
     setChats((prev) => prev.map((c) => (c.id === id ? { ...c, title: newTitle } : c)));
   };
 
-  // Exclusão garantida: remove do DB e limpa a tela instantaneamente
   const deleteChat = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     await db.chats.delete(id);
@@ -260,9 +275,7 @@ export default function App() {
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter') {
-      if (e.ctrlKey || e.shiftKey || e.metaKey) {
-        return;
-      }
+      if (e.ctrlKey || e.shiftKey || e.metaKey) return;
       e.preventDefault();
       handleSendMessage();
     }
@@ -277,6 +290,11 @@ export default function App() {
   };
 
   const handleSendMessage = async (customMessageText?: string, baseHistory?: Message[]) => {
+    if (isTokenLimitExceeded) {
+      alert(`Limite de tokens do modelo atingido (${totalEstimatedTokens.toLocaleString()} de ${modelInfo.contextLimit.toLocaleString()}). Limpe mensagens antigas ou selecione um modelo com contexto maior.`);
+      return;
+    }
+
     const textToSend = customMessageText !== undefined ? customMessageText : inputMessage;
     if ((!textToSend.trim() && attachments.length === 0) || isLoading || !activeChatId) return;
 
@@ -287,7 +305,6 @@ export default function App() {
 
     let currentMessages = baseHistory !== undefined ? baseHistory : messages;
 
-    // Se for uma nova mensagem do usuário (e não retry de bot)
     if (customMessageText === undefined || baseHistory !== undefined) {
       const userMsg: Message = {
         chatId: activeChatId,
@@ -312,7 +329,6 @@ export default function App() {
     setIsLoading(true);
     abortControllerRef.current = new AbortController();
 
-    // Adiciona placeholder da IA
     setMessages((prev) => [
       ...prev,
       { chatId: activeChatId, role: 'model', content: '', timestamp: Date.now() },
@@ -355,9 +371,8 @@ export default function App() {
       }
     } catch (err: any) {
       if (!abortControllerRef.current?.signal.aborted) {
-        const errorMessage = `⚠️ Erro: ${err.message || 'Falha na resposta do Oráculo.'}`;
+        const errorMessage = `Erro: ${err.message || 'Falha na resposta do Oráculo.'}`;
         
-        // Exibe o erro visualmente no balão de chat sem travar
         setMessages((prev) => {
           const updated = [...prev];
           updated[updated.length - 1] = {
@@ -380,11 +395,9 @@ export default function App() {
     }
   };
 
-  // Editar pergunta do usuário e re-executar daquele ponto
   const handleEditMessage = async (index: number, newContent: string) => {
     if (!activeChatId) return;
 
-    // Apaga do banco as mensagens daquele ponto para frente
     const messagesToDelete = messages.slice(index);
     for (const msg of messagesToDelete) {
       if (msg.id) await db.messages.delete(msg.id);
@@ -392,16 +405,12 @@ export default function App() {
 
     const historyBefore = messages.slice(0, index);
     setMessages(historyBefore);
-
-    // Reenvia com o novo texto
     handleSendMessage(newContent, historyBefore);
   };
 
-  // Regenerar a última resposta da IA
   const handleRetryLastMessage = async () => {
     if (messages.length === 0 || isLoading) return;
 
-    // Se a última for do modelo, remove ela e re-executa a partir da última do usuário
     const lastMsg = messages[messages.length - 1];
     if (lastMsg.role === 'model' && lastMsg.id) {
       await db.messages.delete(lastMsg.id);
@@ -453,26 +462,45 @@ export default function App() {
             <span className="font-bold text-xs tracking-widest bg-gradient-to-r from-purple-400 to-indigo-300 bg-clip-text text-transparent uppercase">
               ESPERTO
             </span>
+            
+            {/* Badge do Modelo com Selo Grátis/Pago */}
             <button
               onClick={() => setIsSettingsOpen(true)}
-              className="text-[10px] font-semibold bg-purple-950/80 hover:bg-purple-900/80 text-purple-300 px-2.5 py-0.5 rounded-full border border-purple-800/40 transition cursor-pointer"
+              className="text-[10px] font-semibold bg-purple-950/80 hover:bg-purple-900/80 text-purple-300 px-2.5 py-0.5 rounded-full border border-purple-800/40 transition cursor-pointer flex items-center gap-1.5"
             >
-              {settings.model || 'gemini-3.7-flash'}
+              <span>{settings.model || 'gemini-3.7-flash'}</span>
+              {modelInfo.pricing === 'free_tier' ? (
+                <span className="bg-emerald-950 text-emerald-300 text-[9px] px-1 py-0.2 rounded font-bold border border-emerald-800/50">GRÁTIS</span>
+              ) : (
+                <span className="bg-amber-950 text-amber-300 text-[9px] px-1 py-0.2 rounded font-bold border border-amber-800/50">PAGO</span>
+              )}
             </button>
 
-            {/* Contador de Tokens */}
+            {/* Contador e Medidor de Contexto */}
             <div
               title={`Contexto estimado: ${totalEstimatedTokens.toLocaleString()} de ${(modelInfo.contextLimit / 1000).toFixed(0)}k tokens`}
-              className="hidden md:flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-surface border border-purple-900/30 text-[10px] font-mono text-purple-300"
+              className={`hidden md:flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-[10px] font-mono ${
+                isTokenLimitExceeded
+                  ? 'bg-red-950/80 border-red-500 text-red-300 animate-pulse'
+                  : tokenUsagePercent > 80
+                  ? 'bg-amber-950/60 border-amber-500/50 text-amber-300'
+                  : 'bg-surface border-purple-900/30 text-purple-300'
+              }`}
             >
-              <Activity size={11} className={tokenUsagePercent > 80 ? 'text-red-400' : 'text-purple-400'} />
+              <Activity size={11} className={isTokenLimitExceeded || tokenUsagePercent > 80 ? 'text-red-400' : 'text-purple-400'} />
               <span>{totalEstimatedTokens > 1000 ? `${(totalEstimatedTokens / 1000).toFixed(1)}k` : totalEstimatedTokens}</span>
               <span className="text-gray-500">/</span>
               <span className="text-gray-400">{modelInfo.contextLimit >= 1000000 ? '1.0M' : `${modelInfo.contextLimit / 1000}k`}</span>
-              <span className={`font-bold ml-0.5 ${tokenUsagePercent > 80 ? 'text-red-400' : 'text-purple-400/80'}`}>
-                ({tokenUsagePercent}%)
-              </span>
+              <span className="font-bold ml-0.5">({tokenUsagePercent}%)</span>
             </div>
+
+            {/* Cronômetro durante streaming */}
+            {isLoading && (
+              <div className="flex items-center gap-1 text-[11px] font-mono text-purple-300 bg-purple-950/70 border border-purple-500/40 px-2 py-0.5 rounded-full animate-pulse">
+                <Timer size={11} />
+                <span>{elapsedTime.toFixed(1)}s</span>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
@@ -550,13 +578,36 @@ export default function App() {
               />
             ))
           )}
+
+          {/* Indicador pulsante durante resposta com cronômetro */}
+          {isLoading && messages[messages.length - 1]?.content === '' && (
+            <div className="flex items-center gap-3 p-5 text-purple-300 bg-surface/30 border-y border-purple-950/20">
+              <div className="w-8 h-8 rounded-xl bg-purple-950 border border-purple-500/30 flex items-center justify-center animate-pulse">
+                <Eye size={18} className="text-purple-400" />
+              </div>
+              <div className="flex items-center gap-2 text-xs font-mono">
+                <span className="animate-pulse">Consultando Oráculo...</span>
+                <span className="text-purple-400 font-bold">({elapsedTime.toFixed(1)}s)</span>
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* Caixa de Entrada com Textarea */}
+        {/* Aviso de Limite de Tokens Ultrapassado */}
+        {isTokenLimitExceeded && (
+          <div className="bg-red-950/80 border-t border-red-800 px-4 py-2 flex items-center justify-between text-xs text-red-200">
+            <div className="flex items-center gap-2">
+              <AlertCircle size={15} className="text-red-400" />
+              <span>Limite de tokens atingido ({totalEstimatedTokens.toLocaleString()} / {modelInfo.contextLimit.toLocaleString()}).</span>
+            </div>
+            <span className="text-[11px] text-red-300">Troque o modelo nas configurações ou inicie um novo chat.</span>
+          </div>
+        )}
+
+        {/* Caixa de Entrada */}
         <div className="p-4 bg-surface/40 border-t border-purple-950/30">
           <form onSubmit={(e) => { e.preventDefault(); handleSendMessage(); }} className="max-w-4xl mx-auto flex flex-col gap-2">
             
-            {/* Lista de Prévia de Anexos e Snippets */}
             {attachments.length > 0 && (
               <div className="flex flex-wrap gap-2 p-2 bg-surface/80 rounded-xl border border-purple-900/40">
                 {attachments.map((att, index) => (
@@ -620,7 +671,7 @@ export default function App() {
               ) : (
                 <button
                   type="submit"
-                  disabled={!inputMessage.trim() && attachments.length === 0}
+                  disabled={(!inputMessage.trim() && attachments.length === 0) || isTokenLimitExceeded}
                   className="bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 disabled:opacity-40 text-white p-2.5 rounded-xl transition flex items-center justify-center shrink-0 shadow-lg shadow-purple-950/50 cursor-pointer"
                   title="Enviar mensagem (Enter)"
                 >
