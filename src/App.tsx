@@ -5,6 +5,8 @@ import { Sidebar } from './components/Sidebar';
 import { ChatMessage } from './components/ChatMessage';
 import { SettingsModal } from './components/SettingsModal';
 import { Send, Sliders, Eye, Brain, Copy } from 'lucide-react';
+import { UpdateModal } from './components/UpdateModal';
+import { checkForUpdates, ReleaseInfo } from './services/updater';
 
 const defaultSettings: Settings = {
   id: 'default',
@@ -27,6 +29,17 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settings, setSettings] = useState<Settings>(defaultSettings);
+  const [isUpdateOpen, setIsUpdateOpen] = useState(false);
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+  const [latestRelease, setLatestRelease] = useState<ReleaseInfo | null>(null);
+
+  const handleCheckUpdate = async (openModal = true) => {
+    if (openModal) setIsUpdateOpen(true);
+    setIsCheckingUpdate(true);
+    const release = await checkForUpdates();
+    setLatestRelease(release);
+    setIsCheckingUpdate(false);
+  };
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
@@ -236,6 +249,7 @@ export default function App() {
         onDuplicateChat={handleDuplicateChat}
         onDeleteChat={deleteChat}
         onOpenSettings={() => setIsSettingsOpen(true)}
+        onCheckUpdate={() => handleCheckUpdate(true)}
       />
       <main className="flex-1 flex flex-col h-full overflow-hidden relative">
         <header data-tauri-drag-region className="h-14 border-b border-purple-950/30 flex items-center justify-between px-6 bg-[#090c10] backdrop-blur-sm select-none">
@@ -257,8 +271,8 @@ export default function App() {
               onClick={toggleMemory}
               title={useMemory ? 'Memória de todo o chat ATIVA' : 'Memória do chat DESATIVADA'}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition border ${useMemory
-                  ? 'bg-purple-950/60 text-purple-300 border-purple-500/40'
-                  : 'bg-surface text-gray-500 border-gray-800 hover:text-gray-300'
+                ? 'bg-purple-950/60 text-purple-300 border-purple-500/40'
+                : 'bg-surface text-gray-500 border-gray-800 hover:text-gray-300'
                 }`}
             >
               <Brain size={14} className={useMemory ? 'text-purple-400' : ''} />
@@ -279,8 +293,8 @@ export default function App() {
             <button
               onClick={() => setShowSystemPrompt(!showSystemPrompt)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition border ${showSystemPrompt || systemInstruction
-                  ? 'bg-purple-600/20 text-purple-300 border-purple-500/30'
-                  : 'text-gray-400 hover:text-white bg-surface border-purple-950/30'
+                ? 'bg-purple-600/20 text-purple-300 border-purple-500/30'
+                : 'text-gray-400 hover:text-white bg-surface border-purple-950/30'
                 }`}
             >
               <Sliders size={14} />
@@ -345,6 +359,14 @@ export default function App() {
         onClose={() => setIsSettingsOpen(false)}
         settings={settings}
         onSave={handleSaveSettings}
+      />
+
+      <UpdateModal
+        isOpen={isUpdateOpen}
+        onClose={() => setIsUpdateOpen(false)}
+        checking={isCheckingUpdate}
+        release={latestRelease}
+        onCheckAgain={() => handleCheckUpdate(true)}
       />
     </div>
   );

@@ -32,11 +32,12 @@ export async function* streamAIResponse({
     finalSystemInstruction += `\n\n[MEMÓRIA GLOBAL DO USUÁRIO]:\n${globalMemory.trim()}`;
   }
 
-  // 1. Google Gemini
+  // 1. Google Gemini (suporta a chave nova e a legada)
   if (provider === 'gemini') {
-    if (!settings.geminiApiKey) throw new Error('Chave de API do Gemini não configurada.');
+    const key = settings.geminiApiKey || (settings as any).apiKey;
+    if (!key) throw new Error('Chave de API do Gemini não configurada. Abra as Configurações e cole sua chave.');
     yield* streamGemini({
-      apiKey: settings.geminiApiKey,
+      apiKey: key,
       model,
       systemInstruction: finalSystemInstruction,
       history: relevantHistory,
@@ -47,7 +48,7 @@ export async function* streamAIResponse({
 
   // 2. Anthropic Claude
   if (provider === 'anthropic') {
-    if (!settings.anthropicApiKey) throw new Error('Chave de API do Claude/Anthropic não configurada.');
+    if (!settings.anthropicApiKey) throw new Error('Chave de API do Claude não configurada.');
     yield* streamClaude({
       apiKey: settings.anthropicApiKey,
       model,

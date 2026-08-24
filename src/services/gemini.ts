@@ -16,10 +16,14 @@ export async function* streamGemini({
   history,
   newMessage,
 }: StreamOptions) {
-  const ai = new GoogleGenAI({ apiKey });
+  if (!apiKey || !apiKey.trim()) {
+    throw new Error('Chave de API do Gemini não informada. Abra as Configurações e insira sua chave.');
+  }
+
+  const ai = new GoogleGenAI({ apiKey: apiKey.trim() });
 
   const contents = history.map((msg) => ({
-    role: msg.role,
+    role: msg.role === 'model' ? 'model' : 'user',
     parts: [{ text: msg.content }],
   }));
 
