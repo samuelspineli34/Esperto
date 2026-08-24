@@ -5,7 +5,7 @@ export interface AIModel {
   name: string;
   provider: Provider;
   description: string;
-  contextLimit: number; // Limite de tokens
+  contextLimit: number;
   supportsImages: boolean;
   supportsSearch: boolean;
 }
@@ -17,7 +17,7 @@ const RAW_MODELS: AIModel[] = [
     name: 'Gemini 3.7 Flash',
     provider: 'gemini',
     description: 'Mais avançado para código, raciocínio híbrido e multimodal',
-    contextLimit: 1048576, // 1M tokens
+    contextLimit: 1048576,
     supportsImages: true,
     supportsSearch: true,
   },
@@ -26,7 +26,7 @@ const RAW_MODELS: AIModel[] = [
     name: 'Gemini 3.6 Flash',
     provider: 'gemini',
     description: 'Rápido, multimodal e estável',
-    contextLimit: 1048576, // 1M tokens
+    contextLimit: 1048576,
     supportsImages: true,
     supportsSearch: true,
   },
@@ -114,13 +114,22 @@ export const AVAILABLE_MODELS: AIModel[] = [...RAW_MODELS].sort((a, b) =>
   a.name.localeCompare(b.name)
 );
 
+export function getProviderByModel(modelId: string): Provider {
+  const found = AVAILABLE_MODELS.find((m) => m.id === modelId);
+  if (found) return found.provider;
+  if (modelId.startsWith('claude')) return 'anthropic';
+  if (modelId.startsWith('deepseek')) return 'deepseek';
+  if (modelId.startsWith('gpt') || modelId.startsWith('o1') || modelId.startsWith('o3')) return 'openai';
+  return 'gemini';
+}
+
 export function getModelInfo(modelId: string): AIModel {
   const found = AVAILABLE_MODELS.find((m) => m.id === modelId);
   if (found) return found;
   return {
     id: modelId,
     name: modelId,
-    provider: 'gemini',
+    provider: getProviderByModel(modelId),
     description: 'Modelo customizado',
     contextLimit: 1048576,
     supportsImages: true,

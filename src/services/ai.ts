@@ -1,17 +1,18 @@
-import { Message, Settings } from '../lib/db';
+import { Message, Settings, Attachment } from '../lib/db';
 import { getProviderByModel } from '../lib/models';
 import { streamGemini } from './gemini';
 import { streamClaude } from './claude';
 import { streamOpenAI } from './openai';
 import { streamDeepSeek } from './deepseek';
 
-interface StreamOptions {
+export interface StreamOptions {
   model: string;
   settings: Settings;
   systemInstruction?: string;
   globalMemory?: string;
   history: Message[];
   newMessage: string;
+  attachments?: Attachment[];
   useMemory?: boolean;
 }
 
@@ -22,6 +23,7 @@ export async function* streamAIResponse({
   globalMemory,
   history,
   newMessage,
+  attachments = [],
   useMemory = true,
 }: StreamOptions) {
   const provider = getProviderByModel(model);
@@ -32,16 +34,20 @@ export async function* streamAIResponse({
     finalSystemInstruction += `\n\n[MEMÓRIA GLOBAL DO USUÁRIO]:\n${globalMemory.trim()}`;
   }
 
-  // 1. Google Gemini (suporta a chave nova e a legada)
+  // 1. Google Gemini
   if (provider === 'gemini') {
     const key = settings.geminiApiKey || (settings as any).apiKey;
-    if (!key) throw new Error('Chave de API do Gemini não configurada. Abra as Configurações e cole sua chave.');
+    if (!key) throw new Error('Chave de API do Gemini não configurada.');
     yield* streamGemini({
       apiKey: key,
       model,
       systemInstruction: finalSystemInstruction,
       history: relevantHistory,
       newMessage,
+      attachments,
+      mediaResolution: settings.mediaResolution,
+      googleSearch: settings.googleSearch,
+      thinkingLevel: settings.thinkingLevel,
     });
     return;
   }
@@ -59,7 +65,7 @@ export async function* streamAIResponse({
     return;
   }
 
-  // 3. OpenAI ChatGPT
+  // 3. OpenAI
   if (provider === 'openai') {
     if (!settings.openaiApiKey) throw new Error('Chave de API da OpenAI não configurada.');
     yield* streamOpenAI({
