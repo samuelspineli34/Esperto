@@ -4,6 +4,8 @@ export interface Chat {
   id: string;
   title: string;
   systemInstruction?: string;
+  useMemory?: boolean;
+  model?: string;
   createdAt: number;
 }
 
@@ -17,8 +19,12 @@ export interface Message {
 
 export interface Settings {
   id: string;
-  apiKey: string;
   model: string;
+  globalMemory?: string;
+  geminiApiKey?: string;
+  openaiApiKey?: string;
+  anthropicApiKey?: string;
+  deepseekApiKey?: string;
 }
 
 class EspertoDatabase extends Dexie {

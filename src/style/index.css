@@ -1,13 +1,31 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
-body {
-  @apply bg-background text-gray-100 antialiased overflow-hidden select-none;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+@theme {
+  --color-background: #090c10;
+  --color-surface: #111622;
+  --color-surfaceHover: #1b2336;
+  --color-accent: #7c3aed;
 }
 
-/* Custom Scrollbar */
+/* Garante cursor pointer em absolutamente todos os botões e interativos */
+button, 
+[role="button"], 
+select, 
+option, 
+input[type="checkbox"], 
+a {
+  cursor: pointer !important;
+}
+
+body {
+  background-color: var(--color-background);
+  color: #f3f4f6;
+  user-select: none;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  overflow: hidden;
+}
+
+/* Barra de rolagem mística */
 ::-webkit-scrollbar {
   width: 6px;
 }
@@ -15,9 +33,9 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #30363d;
+  background: #283046;
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #484f58;
+  background: #4a3b75;
 }

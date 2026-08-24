@@ -9,7 +9,7 @@ interface StreamOptions {
   newMessage: string;
 }
 
-export async function* streamGeminiResponse({
+export async function* streamGemini({
   apiKey,
   model,
   systemInstruction,
@@ -18,23 +18,21 @@ export async function* streamGeminiResponse({
 }: StreamOptions) {
   const ai = new GoogleGenAI({ apiKey });
 
-  // Converte o histórico local para o formato do Gemini
   const contents = history.map((msg) => ({
     role: msg.role,
     parts: [{ text: msg.content }],
   }));
 
-  // Adiciona a nova mensagem do usuário
   contents.push({
     role: 'user',
     parts: [{ text: newMessage }],
   });
 
   const responseStream = await ai.models.generateContentStream({
-    model: model || 'gemini-2.5-flash',
-    contents: contents,
+    model: model.trim() || 'gemini-3.7-flash',
+    contents,
     config: {
-      systemInstruction: systemInstruction || 'Você é o Esperto, um assistente prestativo, inteligente e direto ao ponto.',
+      systemInstruction: systemInstruction || 'Você é o Esperto, uma entidade oracular de inteligência e sabedoria.',
       temperature: 0.7,
     },
   });

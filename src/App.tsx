@@ -1,10 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { db, Chat, Message } from './lib/db';
-import { streamGeminiResponse } from './services/gemini';
+import { db, Chat, Message, Settings } from './lib/db';
+import { streamAIResponse } from './services/ai';
 import { Sidebar } from './components/Sidebar';
 import { ChatMessage } from './components/ChatMessage';
 import { SettingsModal } from './components/SettingsModal';
-import { Send, Sliders, Sparkles } from 'lucide-react';
+import { Send, Sliders, Eye, Brain, Copy } from 'lucide-react';
+
+const defaultSettings: Settings = {
+  id: 'default',
+  model: 'gemini-3.7-flash',
+  globalMemory: '',
+  geminiApiKey: '',
+  openaiApiKey: '',
+  anthropicApiKey: '',
+  deepseekApiKey: '',
+};
 
 export default function App() {
   const [chats, setChats] = useState<Chat[]>([]);
@@ -12,21 +22,21 @@ export default function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [systemInstruction, setSystemInstruction] = useState('');
+  const [useMemory, setUseMemory] = useState(true);
   const [showSystemPrompt, setShowSystemPrompt] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [apiKey, setApiKey] = useState('');
-  const [model, setModel] = useState('gemini-2.5-flash');
+  const [settings, setSettings] = useState<Settings>(defaultSettings);
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
-  // Carregar configurações e chats iniciais
   useEffect(() => {
     const loadInitialData = async () => {
       const savedSettings = await db.settings.get('default');
       if (savedSettings) {
-        setApiKey(savedSettings.apiKey);
-        setModel(savedSettings.model);
+        setSettings(savedSettings);
+      } else {
+        await db.settings.put(defaultSettings);
       }
 
       const allChats = await db.chats.orderBy('createdAt').reverse().toArray();
@@ -41,7 +51,6 @@ export default function App() {
     loadInitialData();
   }, []);
 
-  // Carregar mensagens quando o chat ativo muda
   useEffect(() => {
     if (!activeChatId) return;
 
@@ -49,6 +58,7 @@ export default function App() {
       const activeChat = await db.chats.get(activeChatId);
       if (activeChat) {
         setSystemInstruction(activeChat.systemInstruction || '');
+        setUseMemory(activeChat.useMemory !== false);
       }
 
       const chatMessages = await db.messages
@@ -61,7 +71,6 @@ export default function App() {
     loadChatData();
   }, [activeChatId]);
 
-  // Auto-scroll
   useEffect(() => {
     chatContainerRef.current?.scrollTo({
       top: chatContainerRef.current.scrollHeight,
@@ -72,13 +81,48 @@ export default function App() {
   const createNewChat = async () => {
     const newChat: Chat = {
       id: crypto.randomUUID(),
-      title: 'Nova Conversa',
+      title: 'Nova Consulta',
       systemInstruction: '',
+      useMemory: true,
       createdAt: Date.now(),
     };
     await db.chats.add(newChat);
     setChats((prev) => [newChat, ...prev]);
     setActiveChatId(newChat.id);
+  };
+
+  const handleDuplicateChat = async (sourceChatId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const sourceChat = await db.chats.get(sourceChatId);
+    if (!sourceChat) return;
+
+    const newChatId = crypto.randomUUID();
+    const newChat: Chat = {
+      id: newChatId,
+      title: `${sourceChat.title} (Ramo)`,
+      systemInstruction: sourceChat.systemInstruction || '',
+      useMemory: sourceChat.useMemory !== false,
+      createdAt: Date.now(),
+    };
+
+    await db.chats.add(newChat);
+
+    const sourceMessages = await db.messages
+      .where('chatId')
+      .equals(sourceChatId)
+      .sortBy('timestamp');
+
+    for (const msg of sourceMessages) {
+      await db.messages.add({
+        chatId: newChatId,
+        role: msg.role,
+        content: msg.content,
+        timestamp: msg.timestamp,
+      });
+    }
+
+    setChats((prev) => [newChat, ...prev]);
+    setActiveChatId(newChatId);
   };
 
   const deleteChat = async (id: string, e: React.MouseEvent) => {
@@ -99,19 +143,21 @@ export default function App() {
     }
   };
 
+  const toggleMemory = async () => {
+    const newValue = !useMemory;
+    setUseMemory(newValue);
+    if (activeChatId) {
+      await db.chats.update(activeChatId, { useMemory: newValue });
+    }
+  };
+
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputMessage.trim() || isLoading || !activeChatId) return;
 
-    if (!apiKey) {
-      setIsSettingsOpen(true);
-      return;
-    }
-
     const currentInput = inputMessage;
     setInputMessage('');
 
-    // Salva a mensagem do usuário no DB
     const userMsg: Message = {
       chatId: activeChatId,
       role: 'user',
@@ -121,9 +167,8 @@ export default function App() {
     await db.messages.add(userMsg);
     setMessages((prev) => [...prev, userMsg]);
 
-    // Atualiza o título do chat se for a primeira mensagem
     if (messages.length === 0) {
-      const newTitle = currentInput.slice(0, 28) + (currentInput.length > 28 ? '...' : '');
+      const newTitle = currentInput.slice(0, 26) + (currentInput.length > 26 ? '...' : '');
       await db.chats.update(activeChatId, { title: newTitle });
       setChats((prev) =>
         prev.map((c) => (c.id === activeChatId ? { ...c, title: newTitle } : c))
@@ -133,14 +178,15 @@ export default function App() {
     setIsLoading(true);
 
     try {
-      // Adiciona mensagem temporária para o streaming do modelo
       let responseText = '';
-      const generator = streamGeminiResponse({
-        apiKey,
-        model,
+      const generator = streamAIResponse({
+        model: settings.model || 'gemini-3.7-flash',
+        settings,
         systemInstruction,
+        globalMemory: settings.globalMemory,
         history: messages,
         newMessage: currentInput,
+        useMemory,
       });
 
       setMessages((prev) => [
@@ -160,7 +206,6 @@ export default function App() {
         });
       }
 
-      // Persiste a resposta completa no DB
       await db.messages.add({
         chatId: activeChatId,
         role: 'model',
@@ -169,16 +214,16 @@ export default function App() {
       });
     } catch (err: any) {
       console.error(err);
-      alert('Erro na resposta do Gemini: ' + (err.message || 'Verifique sua API Key'));
+      alert(err.message || 'Erro ao consultar o Oráculo. Verifique sua chave de API nas configurações.');
+      setIsSettingsOpen(true);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleSaveSettings = async (newKey: string, newModel: string) => {
-    setApiKey(newKey);
-    setModel(newModel);
-    await db.settings.put({ id: 'default', apiKey: newKey, model: newModel });
+  const handleSaveSettings = async (newSettings: Settings) => {
+    setSettings(newSettings);
+    await db.settings.put(newSettings);
   };
 
   return (
@@ -188,52 +233,84 @@ export default function App() {
         activeChatId={activeChatId}
         onSelectChat={setActiveChatId}
         onNewChat={createNewChat}
+        onDuplicateChat={handleDuplicateChat}
         onDeleteChat={deleteChat}
         onOpenSettings={() => setIsSettingsOpen(true)}
       />
-
       <main className="flex-1 flex flex-col h-full overflow-hidden relative">
-        {/* Top Header com Custom System Instructions */}
-        <header className="h-14 border-b border-gray-800 flex items-center justify-between px-6 bg-surface/40">
-          <div className="flex items-center gap-2">
-            <Sparkles size={18} className="text-indigo-400" />
-            <h1 className="font-semibold text-sm text-gray-200">Esperto Desktop</h1>
+        <header data-tauri-drag-region className="h-14 border-b border-purple-950/30 flex items-center justify-between px-6 bg-[#090c10] backdrop-blur-sm select-none">
+          <div className="flex items-center gap-2.5">
+            <Eye size={18} className="text-purple-400 animate-pulse" />
+            <span className="font-bold text-xs tracking-widest bg-gradient-to-r from-purple-400 to-indigo-300 bg-clip-text text-transparent uppercase">
+              ESPERTO
+            </span>
+            <button
+              onClick={() => setIsSettingsOpen(true)}
+              className="text-[10px] font-semibold bg-purple-950/80 hover:bg-purple-900/80 text-purple-300 px-2.5 py-0.5 rounded-full border border-purple-800/40 transition"
+            >
+              {settings.model || 'gemini-3.7-flash'}
+            </button>
           </div>
-          <button
-            onClick={() => setShowSystemPrompt(!showSystemPrompt)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
-              showSystemPrompt || systemInstruction
-                ? 'bg-indigo-600/20 text-indigo-300 border border-indigo-500/30'
-                : 'text-gray-400 hover:text-white bg-surface'
-            }`}
-          >
-            <Sliders size={14} />
-            <span>{systemInstruction ? 'Instruções Ativas' : 'Definir Instruções'}</span>
-          </button>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={toggleMemory}
+              title={useMemory ? 'Memória de todo o chat ATIVA' : 'Memória do chat DESATIVADA'}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition border ${useMemory
+                  ? 'bg-purple-950/60 text-purple-300 border-purple-500/40'
+                  : 'bg-surface text-gray-500 border-gray-800 hover:text-gray-300'
+                }`}
+            >
+              <Brain size={14} className={useMemory ? 'text-purple-400' : ''} />
+              <span>{useMemory ? 'Memória: ON' : 'Memória: OFF'}</span>
+            </button>
+
+            {activeChatId && (
+              <button
+                onClick={() => handleDuplicateChat(activeChatId)}
+                title="Ramificar / Duplicar esta conversa"
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-medium text-gray-400 hover:text-purple-200 bg-surface border border-purple-950/30 hover:bg-surfaceHover transition"
+              >
+                <Copy size={13} />
+                <span>Duplicar</span>
+              </button>
+            )}
+
+            <button
+              onClick={() => setShowSystemPrompt(!showSystemPrompt)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition border ${showSystemPrompt || systemInstruction
+                  ? 'bg-purple-600/20 text-purple-300 border-purple-500/30'
+                  : 'text-gray-400 hover:text-white bg-surface border-purple-950/30'
+                }`}
+            >
+              <Sliders size={14} />
+              <span>{systemInstruction ? 'Instruções Ativas' : 'Instruções'}</span>
+            </button>
+          </div>
         </header>
 
-        {/* Drawer para editar System Instruction */}
         {showSystemPrompt && (
-          <div className="p-4 bg-surface border-b border-gray-800 transition">
-            <label className="block text-xs font-medium text-gray-300 mb-1">
-              Instruções Personalizadas deste Chat (Persona / System Prompt):
+          <div className="p-4 bg-surface border-b border-purple-950/40 transition">
+            <label className="block text-xs font-medium text-purple-300 mb-1">
+              Instruções Ocultas deste Chat (Persona / System Prompt):
             </label>
             <textarea
               rows={2}
               value={systemInstruction}
               onChange={(e) => handleUpdateSystemInstruction(e.target.value)}
-              placeholder="Ex: Aja como um arquiteto de software sênior. Responda com clareza e exemplos em TypeScript."
-              className="w-full bg-background border border-gray-700 rounded-lg p-2 text-xs text-white focus:outline-none focus:border-indigo-500 resize-none"
+              placeholder="Ex: Aja como um arquiteto especialista em Rust e TypeScript. Seja conciso e direto."
+              className="w-full bg-background border border-purple-900/40 rounded-xl p-2.5 text-xs text-white focus:outline-none focus:border-purple-500 resize-none"
             />
           </div>
         )}
 
-        {/* Área de Mensagens */}
         <div ref={chatContainerRef} className="flex-1 overflow-y-auto">
           {messages.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-gray-500">
-              <Sparkles size={48} className="text-indigo-500 mb-4 opacity-50" />
-              <p className="text-sm font-medium">Como o Esperto pode te ajudar hoje?</p>
+            <div className="h-full flex flex-col items-center justify-center text-purple-300/40 select-none">
+              <div className="w-16 h-16 rounded-2xl bg-purple-950/30 border border-purple-500/20 flex items-center justify-center mb-4 shadow-xl shadow-purple-950/30">
+                <Eye size={36} className="text-purple-400 animate-pulse" />
+              </div>
+              <p className="text-sm font-medium">Consulte qualquer conhecimento pelo Esperto.</p>
             </div>
           ) : (
             messages.map((msg, index) => (
@@ -242,8 +319,7 @@ export default function App() {
           )}
         </div>
 
-        {/* Input de Envio */}
-        <div className="p-4 bg-surface/40 border-t border-gray-800">
+        <div className="p-4 bg-surface/40 border-t border-purple-950/30">
           <form onSubmit={handleSendMessage} className="max-w-4xl mx-auto flex gap-3">
             <input
               type="text"
@@ -251,12 +327,12 @@ export default function App() {
               onChange={(e) => setInputMessage(e.target.value)}
               placeholder="Pergunte ao Esperto..."
               disabled={isLoading}
-              className="flex-1 bg-surface border border-gray-700 focus:border-indigo-500 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-500 focus:outline-none transition disabled:opacity-50"
+              className="flex-1 bg-surface border border-purple-900/40 focus:border-purple-500 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-500 focus:outline-none transition disabled:opacity-50 shadow-inner"
             />
             <button
               type="submit"
               disabled={isLoading || !inputMessage.trim()}
-              className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white p-3 rounded-xl transition flex items-center justify-center shrink-0"
+              className="bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 disabled:opacity-40 text-white p-3 rounded-xl transition flex items-center justify-center shrink-0 shadow-lg shadow-purple-950/50"
             >
               <Send size={18} />
             </button>
@@ -267,8 +343,7 @@ export default function App() {
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
-        apiKey={apiKey}
-        model={model}
+        settings={settings}
         onSave={handleSaveSettings}
       />
     </div>
