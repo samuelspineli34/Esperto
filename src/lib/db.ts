@@ -1,5 +1,12 @@
 import Dexie, { type Table } from 'dexie';
 
+export interface Attachment {
+  name: string;
+  mimeType: string;
+  data: string; // Base64
+  size?: number;
+}
+
 export interface Chat {
   id: string;
   title: string;
@@ -14,6 +21,7 @@ export interface Message {
   chatId: string;
   role: 'user' | 'model';
   content: string;
+  attachments?: Attachment[];
   timestamp: number;
 }
 
@@ -25,6 +33,10 @@ export interface Settings {
   openaiApiKey?: string;
   anthropicApiKey?: string;
   deepseekApiKey?: string;
+  // Configurações Avançadas (Estilo AI Studio):
+  mediaResolution?: 'default' | 'low' | 'medium' | 'high';
+  thinkingLevel?: 'off' | 'low' | 'medium' | 'high';
+  googleSearch?: boolean;
 }
 
 class EspertoDatabase extends Dexie {

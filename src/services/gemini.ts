@@ -1,5 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
-import { Message } from '../lib/db';
+import { Message, Attachment } from '../lib/db';
 
 interface StreamOptions {
   apiKey: string;
@@ -7,6 +7,10 @@ interface StreamOptions {
   systemInstruction?: string;
   history: Message[];
   newMessage: string;
+  attachments?: Attachment[];
+  mediaResolution?: string;
+  googleSearch?: boolean;
+  thinkingLevel?: string;
 }
 
 export async function* streamGemini({
@@ -15,32 +19,81 @@ export async function* streamGemini({
   systemInstruction,
   history,
   newMessage,
+  attachments = [],
+  mediaResolution = 'default',
+  googleSearch = false,
+  thinkingLevel = 'off',
 }: StreamOptions) {
   if (!apiKey || !apiKey.trim()) {
-    throw new Error('Chave de API do Gemini não configurada. Abra as Configurações e cole sua chave.');
+    throw new Error('Chave de API do Gemini não informada.');
   }
 
-  const selectedModel = model.trim() || 'gemini-2.5-flash';
+  const selectedModel = model.trim() || 'gemini-3.7-flash';
   const ai = new GoogleGenAI({ apiKey: apiKey.trim() });
 
-  const contents = history.map((msg) => ({
-    role: msg.role === 'model' ? 'model' : 'user',
-    parts: [{ text: msg.content }],
-  }));
+  // 1. Converte histórico com textos e anexos passados
+  const contents = history.map((msg) => {
+    const parts: any[] = [{ text: msg.content }];
+    if (msg.attachments && msg.attachments.length > 0) {
+      msg.attachments.forEach((att) => {
+        parts.push({
+          inlineData: {
+            mimeType: att.mimeType,
+            data: att.data,
+          },
+        });
+      });
+    }
+    return {
+      role: msg.role === 'model' ? 'model' : 'user',
+      parts,
+    };
+  });
+
+  // 2. Adiciona a nova mensagem com os novos anexos
+  const newParts: any[] = [{ text: newMessage }];
+  if (attachments.length > 0) {
+    attachments.forEach((att) => {
+      newParts.push({
+        inlineData: {
+          mimeType: att.mimeType,
+          data: att.data,
+        },
+      });
+    });
+  }
 
   contents.push({
     role: 'user',
-    parts: [{ text: newMessage }],
+    parts: newParts,
   });
+
+  // 3. Monta configuração com Google Search e Resolução de Mídia
+  const config: any = {
+    systemInstruction: systemInstruction || 'Você é o Esperto, uma entidade oracular de inteligência e sabedoria.',
+    temperature: 0.7,
+  };
+
+  // Google Search Grounding
+  if (googleSearch) {
+    config.tools = [{ googleSearch: {} }];
+  }
+
+  // Resolução de Mídia
+  if (mediaResolution && mediaResolution !== 'default') {
+    const resMap: Record<string, string> = {
+      low: 'MEDIA_RESOLUTION_LOW',
+      medium: 'MEDIA_RESOLUTION_MEDIUM',
+      high: 'MEDIA_RESOLUTION_HIGH',
+    };
+    config.mediaResolution = resMap[mediaResolution];
+  }
 
   try {
     const responseStream = await ai.models.generateContentStream({
       model: selectedModel,
       contents,
-      config: {
-        systemInstruction: systemInstruction || 'Você é o Esperto, uma entidade oracular de inteligência e sabedoria.',
-        temperature: 0.7,
-      },
+      config,
     });
 
     for await (const chunk of responseStream) {
@@ -50,19 +103,9 @@ export async function* streamGemini({
     }
   } catch (err: any) {
     const errMessage = err?.message || JSON.stringify(err);
-
     if (errMessage.includes('503') || errMessage.includes('high demand')) {
-      throw new Error(
-        `O modelo '${selectedModel}' está com sobrecarga temporária nos servidores do Google. Tente o 'gemini-2.5-flash' nas Configurações.`
-      );
+      throw new Error(`⚠️ O modelo '${selectedModel}' está sobrecarregado no Google. Tente o 'gemini-3.6-flash'.`);
     }
-
-    if (errMessage.includes('429') || errMessage.includes('limit: 0') || errMessage.includes('RESOURCE_EXHAUSTED')) {
-      throw new Error(
-        `O modelo '${selectedModel}' não possui cota gratuita liberada nesta chave. Alterne para o 'gemini-2.5-flash' nas Configurações.`
-      );
-    }
-
-    throw new Error(`Erro na API do Gemini: ${errMessage}`);
+    throw new Error(`Erro Gemini: ${errMessage}`);
   }
 }
