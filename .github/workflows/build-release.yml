@@ -6,6 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: write
 
 # Cancela automaticamente execucoes anteriores se houver novo commit
@@ -115,6 +116,7 @@ jobs:
         with:
           name: windows-unsigned-exe
           path: src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
 
       - name: Verificar Secrets do SignPath
         if: matrix.os == 'windows-latest'
@@ -138,6 +140,7 @@ jobs:
           organization-id: '${{ secrets.SIGNPATH_ORGANIZATION_ID }}'
           project-slug: 'Esperto'
           signing-policy-slug: 'Esperto'
+          artifact-configuration-slug: 'initial'
           github-artifact-id: '${{ steps.upload-unsigned.outputs.artifact-id }}'
           wait-for-completion: true
           output-artifact-directory: 'windows-signed-exe'
