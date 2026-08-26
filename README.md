@@ -98,19 +98,21 @@ Ensure the following tools are installed on your machine:
    cd Esperto
 
 2.  Install dependencies:
-
+   ```bash
     npm install
+   ```
 
 3.  Start development mode with hot-reload:
-
+   ```bash
     npm run tauri:dev
+   ```
 
 Production Build
 
 To compile optimized binaries for your current operating system:
-
+```bash
 npm run tauri:build
-
+```
 Compiled deliverables will be generated in src-tauri/target/release/bundle/:
 
   - Windows: .exe (NSIS installer) and .msi
