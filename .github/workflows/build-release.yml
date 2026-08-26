@@ -8,8 +8,13 @@ on:
 permissions:
   contents: write
 
+# Cancela automaticamente execucoes anteriores se houver novo commit
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  # 1. Cria a tag de versão e a Release
+  # 1. Cria a tag de versao e a Release no GitHub
   create-release:
     runs-on: ubuntu-latest
     outputs:
@@ -38,7 +43,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # 2. Compila Windows e Linux
+  # 2. Compila para Windows, Linux e macOS
   build-binaries:
     needs: create-release
     strategy:
@@ -49,6 +54,8 @@ jobs:
             name: Windows
           - os: ubuntu-latest
             name: Linux
+          - os: macos-latest
+            name: macOS
 
     runs-on: ${{ matrix.os }}
     name: Build - ${{ matrix.name }}
@@ -57,6 +64,7 @@ jobs:
       - name: Baixar codigo
         uses: actions/checkout@v4
 
+      # Dependencias exclusivas do Linux
       - name: Instalar Dependencias (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
@@ -67,6 +75,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: 'npm'
 
       - name: Instalar Rust
         uses: dtolnay/rust-toolchain@stable
@@ -97,7 +106,10 @@ jobs:
         run: npx tauri build
         env:
           APP_VERSION: ${{ needs.create-release.outputs.new_version }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_KEY_PASSWORD }}
 
+      # Anexa instaladores e arquivos de assinatura (.sig) na Release
       - name: Anexar Instaladores na Release
         uses: softprops/action-gh-release@v2
         with:
@@ -107,5 +119,8 @@ jobs:
             src-tauri/target/release/bundle/msi/*.msi
             src-tauri/target/release/bundle/deb/*.deb
             src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/dmg/*.dmg
+            src-tauri/target/release/bundle/updater/*
+            latest.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
