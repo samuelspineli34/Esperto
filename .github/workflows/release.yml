@@ -8,6 +8,11 @@ on:
 permissions:
   contents: write
 
+# Cancela automaticamente execuções antigas que ficaram presas na fila
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # 1. Cria a tag de versão e a Release no GitHub
   create-release:
@@ -19,7 +24,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Gera automaticamente tags como v0.1.0 -> v0.1.1 -> v0.1.2
+      # Gera automaticamente tags sequenciais (v0.1.0 -> v0.1.1)
       - name: Gerar Tag de Versão
         id: tag_version
         uses: anothrNick/github-tag-action@1.71.0
@@ -40,24 +45,29 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # 2. Compila simultaneamente para Windows, Linux e Mac com a versão injetada
+  # 2. Compila estritamente em ordem: 1º Windows -> 2º Linux -> 3º Mac
   build-binaries:
     needs: create-release
     strategy:
+      max-parallel: 1 # Garante que roda um de cada vez na ordem exata
       fail-fast: false
       matrix:
         include:
           - os: windows-latest
+            name: Windows (1º)
           - os: ubuntu-latest
+            name: Linux (2º)
           - os: macos-latest
+            name: macOS (3º)
 
     runs-on: ${{ matrix.os }}
+    name: Build - ${{ matrix.name }}
 
     steps:
       - name: Baixar código
         uses: actions/checkout@v4
 
-      # Dependências do sistema Linux para o Tauri
+      # Dependências exclusivas do Linux
       - name: Instalar Dependências (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
@@ -68,6 +78,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: 'npm'
 
       - name: Instalar Rust
         uses: dtolnay/rust-toolchain@stable
@@ -75,7 +86,7 @@ jobs:
       - name: Instalar Dependências do Projeto
         run: npm install
 
-      # INJETA A VERSÃO DINÂMICA NO PACKAGE.JSON E TAURI.CONF.JSON
+      # Injeta a versão dinâmica nos arquivos de configuração
       - name: Sincronizar Versão Dinâmica
         shell: bash
         run: |
