@@ -7,9 +7,9 @@ import { ChatMessage } from './components/ChatMessage';
 import { SettingsModal } from './components/SettingsModal';
 import { UpdateModal } from './components/UpdateModal';
 import { HelpModal } from './components/HelpModal';
-import { ArtifactPreview } from './components/ArctifactPreview';
+import { ArtifactPreview } from './components/ArtifactPreview';
 import { checkForUpdates, ReleaseInfo } from './services/updater';
-import { Send, Sliders, Eye, Brain, Copy, Paperclip, X, FileText, Image as ImageIcon, Activity, Square, Timer, Folder, FolderCheck, FolderSync, Plus, Trash2, Download as ExportIcon, Bookmark, BookmarkPlus, Check } from 'lucide-react';
+import { Send, Sliders, Eye, Brain, Copy, Paperclip, X, FileText, Image as ImageIcon, Activity, Square, Timer, Folder, FolderCheck, FolderSync, Plus, Trash2, Download as ExportIcon, Bookmark, BookmarkPlus, DollarSign, Gift } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 
 const defaultSettings: Settings = {
@@ -66,7 +66,7 @@ export default function App() {
 
   const modelInfo = useMemo(() => getModelInfo(settings.model || 'gemini-3.7-flash'), [settings.model]);
 
-  // Cronômetro
+  // Cronômetro em tempo real
   useEffect(() => {
     let interval: any;
     if (isLoading) {
@@ -79,7 +79,7 @@ export default function App() {
     return () => clearInterval(interval);
   }, [isLoading]);
 
-  // Contagem de tokens
+  // Contagem de tokens em tempo real
   const totalEstimatedTokens = useMemo(() => {
     let charCount = (settings.globalMemory || '').length + (systemInstruction || '').length;
     messages.forEach((m) => {
@@ -94,7 +94,33 @@ export default function App() {
     return Math.min(100, Math.round((totalEstimatedTokens / modelInfo.contextLimit) * 1000) / 10);
   }, [totalEstimatedTokens, modelInfo.contextLimit]);
 
-  // Carrega configurações, chats e predefinições salvas
+  // Cálculo de Custo Médio Estimado em Dólar para Modelos Pagos
+  const estimatedCostUSD = useMemo(() => {
+    if (modelInfo.pricing === 'free_tier') return 0;
+
+    let userChars = (settings.globalMemory || '').length + (systemInstruction || '').length;
+    let modelChars = 0;
+
+    messages.forEach((m) => {
+      if (m.role === 'user') {
+        userChars += m.content.length;
+        if (m.attachments) m.attachments.forEach((a) => (userChars += a.data.length * 0.1));
+      } else {
+        modelChars += m.content.length;
+      }
+    });
+
+    userChars += inputMessage.length;
+
+    const inputTokens = Math.ceil(userChars / 3.8);
+    const outputTokens = Math.ceil(modelChars / 3.8);
+
+    const inPrice = modelInfo.inputPrice || 2.50;
+    const outPrice = modelInfo.outputPrice || 10.00;
+
+    return (inputTokens / 1000000) * inPrice + (outputTokens / 1000000) * outPrice;
+  }, [messages, inputMessage, systemInstruction, settings.globalMemory, modelInfo]);
+
   useEffect(() => {
     const loadInitialData = async () => {
       const savedSettings = await db.settings.get('default');
@@ -107,16 +133,12 @@ export default function App() {
       const allChats = await db.chats.orderBy('createdAt').reverse().toArray();
       setChats(allChats);
 
-      if (allChats.length > 0) {
-        setActiveChatId(allChats[0].id);
-      } else {
-        createNewChat();
-      }
+      if (allChats.length > 0) setActiveChatId(allChats[0].id);
+      else createNewChat();
     };
     loadInitialData();
   }, []);
 
-  // Carrega chat ativo e suas pastas (ou herda as pastas do último projeto usado se novo)
   useEffect(() => {
     if (!activeChatId) {
       setMessages([]);
@@ -153,7 +175,6 @@ export default function App() {
     });
   }, [messages, isLoading]);
 
-  // Sincroniza pastas locais
   const syncDirectories = async (paths: string[]) => {
     const validPaths = paths.filter((p) => p.trim().length > 0);
     if (validPaths.length === 0) {
@@ -191,7 +212,6 @@ export default function App() {
     syncDirectories(updated);
   };
 
-  // Salvar predefinição de projeto
   const handleSaveAsPreset = async () => {
     if (!newPresetName.trim() || directoryPaths.length === 0) return;
     const newPreset: WorkspacePreset = {
@@ -206,20 +226,17 @@ export default function App() {
     setIsCreatingPreset(false);
   };
 
-  // Aplicar predefinição com 1 clique
   const handleApplyPreset = (preset: WorkspacePreset) => {
     setDirectoryPaths(preset.paths);
     syncDirectories(preset.paths);
   };
 
-  // Excluir predefinição
   const handleDeletePreset = async (presetId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     await db.presets.delete(presetId);
     setPresets((prev) => prev.filter((p) => p.id !== presetId));
   };
 
-  // Seleção Inteligente de Contexto (Smart RAG Budget)
   const buildSmartDirectoryContext = (query: string, files: LoadedFile[]): string => {
     if (files.length === 0) return '';
 
@@ -283,7 +300,7 @@ export default function App() {
       id: crypto.randomUUID(),
       title: 'Nova Consulta',
       systemInstruction: '',
-      directoryPaths: directoryPaths.length > 0 ? [...directoryPaths] : [], // Herda as pastas ativas se houver
+      directoryPaths: directoryPaths.length > 0 ? [...directoryPaths] : [],
       useMemory: true,
       createdAt: Date.now(),
     };
@@ -633,6 +650,7 @@ export default function App() {
               ESPERTO
             </span>
 
+            {/* Badge do Modelo com Selo Grátis/Pago */}
             <button
               onClick={() => setIsSettingsOpen(true)}
               className="text-[10px] font-semibold bg-purple-950/80 hover:bg-purple-900/80 text-purple-300 px-2.5 py-0.5 rounded-full border border-purple-800/40 transition cursor-pointer flex items-center gap-1.5"
@@ -645,6 +663,7 @@ export default function App() {
               )}
             </button>
 
+            {/* Contador de Contexto */}
             <div
               title={`Contexto: ${totalEstimatedTokens.toLocaleString()} de ${(modelInfo.contextLimit / 1000).toFixed(0)}k tokens`}
               className="hidden md:flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-surface border border-purple-900/30 text-[10px] font-mono text-purple-300"
@@ -655,6 +674,28 @@ export default function App() {
               <span className="text-gray-400">{modelInfo.contextLimit >= 1000000 ? '1.0M' : `${modelInfo.contextLimit / 1000}k`}</span>
               <span className="font-bold ml-0.5">({tokenUsagePercent}%)</span>
             </div>
+
+            {/* Indicador de Custo Médio Estimado em Dólar */}
+            {modelInfo.pricing === 'paid_only' ? (
+              <div
+                title={`Custo estimado da conversa atual (${modelInfo.name}): ~$${modelInfo.inputPrice}/1M entrada, ~$${modelInfo.outputPrice}/1M saída`}
+                className="hidden lg:flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-surface border border-amber-900/40 text-[10px] font-mono text-amber-300 shadow-sm"
+              >
+                <DollarSign size={11} className="text-amber-400" />
+                <span>Custo est.:</span>
+                <span className="font-bold text-amber-200">
+                  {estimatedCostUSD < 0.0001 ? '<$0.0001' : `$${estimatedCostUSD.toFixed(4)}`}
+                </span>
+              </div>
+            ) : (
+              <div
+                title="Este modelo está operando em Cota Gratuita (Custo zero)."
+                className="hidden lg:flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-surface border border-emerald-900/30 text-[10px] font-mono text-emerald-300 shadow-sm"
+              >
+                <Gift size={11} className="text-emerald-400" />
+                <span>Custo: $0.00 (Grátis)</span>
+              </div>
+            )}
 
             {isLoading && (
               <div className="flex items-center gap-1 text-[11px] font-mono text-purple-300 bg-purple-950/70 border border-purple-500/40 px-2 py-0.5 rounded-full animate-pulse">
@@ -738,7 +779,7 @@ export default function App() {
                   <Bookmark size={14} className="text-purple-400" />
                   <span>Projetos Salvos (Workspaces com 1 Clique)</span>
                 </span>
-                
+
                 <button
                   onClick={() => setIsCreatingPreset(!isCreatingPreset)}
                   disabled={directoryPaths.length === 0}
