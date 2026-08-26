@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { X, Sparkles, Download, CheckCircle2, RefreshCw, Copy, Check, ExternalLink } from 'lucide-react';
-import { invoke } from '@tauri-apps/api/core';
+import { X, Sparkles, Download, CheckCircle2, RefreshCw, RotateCcw } from 'lucide-react';
+import { check } from '@tauri-apps/plugin-updater';
+import { relaunch } from '@tauri-apps/plugin-process';
 import { ReleaseInfo, CURRENT_VERSION } from '../services/updater';
 
 interface Props {
@@ -18,47 +19,78 @@ export const UpdateModal: React.FC<Props> = ({
   release,
   onCheckAgain,
 }) => {
-  const [copied, setCopied] = useState(false);
-  const [isOpening, setIsOpening] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [downloadComplete, setDownloadComplete] = useState(false);
+  const [statusText, setStatusText] = useState('');
 
   if (!isOpen) return null;
 
-  const handleDownload = async () => {
-    if (!release?.htmlUrl) return;
-
+  const handleInstallUpdate = async () => {
     try {
-      setIsOpening(true);
-      // Chama o comando nativo do Rust
-      await invoke('open_url', { url: release.htmlUrl });
-    } catch (err) {
-      console.error('Erro ao abrir link:', err);
-      window.open(release.htmlUrl, '_blank');
-    } finally {
-      setIsOpening(false);
-    }
-  };
+      setDownloading(true);
+      setStatusText('Buscando pacote de atualização...');
 
-  const handleCopyLink = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!release?.htmlUrl) return;
-    navigator.clipboard.writeText(release.htmlUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2500);
+      const update = await check();
+      if (!update) {
+        setStatusText('Nenhuma atualização pendente encontrada.');
+        setDownloading(false);
+        return;
+      }
+
+      let downloaded = 0;
+      let contentLength = 0;
+
+      // Baixa e instala silenciosamente
+      await update.downloadAndInstall((event) => {
+        switch (event.event) {
+          case 'Started':
+            contentLength = event.data.contentLength || 0;
+            setStatusText('Baixando nova versão...');
+            break;
+          case 'Progress':
+            downloaded += event.data.chunkLength;
+            if (contentLength > 0) {
+              const percent = Math.round((downloaded / contentLength) * 100);
+              setProgress(percent);
+            }
+            break;
+          case 'Finished':
+            setStatusText('Instalando atualização...');
+            break;
+        }
+      });
+
+      setDownloadComplete(true);
+      setStatusText('Atualização pronta! Reiniciando em instantes...');
+      
+      // Reinicia o app atualizado automaticamente em 2 segundos
+      setTimeout(async () => {
+        await relaunch();
+      }, 1500);
+
+    } catch (err: any) {
+      console.error('Erro ao atualizar automaticamente:', err);
+      alert(`Falha ao instalar automaticamente: ${err.message || err}. Você pode baixar pelo GitHub.`);
+      setDownloading(false);
+    }
   };
 
   return (
     <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
       <div className="bg-surface border border-purple-900/40 rounded-3xl w-full max-w-md p-6 relative shadow-2xl shadow-purple-950/80">
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 text-gray-400 hover:text-white p-1 rounded-lg hover:bg-surfaceHover transition cursor-pointer"
-        >
-          <X size={18} />
-        </button>
+        {!downloading && (
+          <button
+            onClick={onClose}
+            className="absolute top-4 right-4 text-gray-400 hover:text-white p-1 rounded-lg hover:bg-surfaceHover transition cursor-pointer"
+          >
+            <X size={18} />
+          </button>
+        )}
 
         <div className="flex items-center gap-2.5 mb-4">
           <div className="p-2 rounded-xl bg-purple-900/40 text-purple-300 border border-purple-500/30">
-            <RefreshCw size={18} className={checking ? 'animate-spin' : ''} />
+            <RefreshCw size={18} className={checking || downloading ? 'animate-spin' : ''} />
           </div>
           <div>
             <h2 className="text-base font-bold text-white">Central de Atualizações</h2>
@@ -76,38 +108,51 @@ export const UpdateModal: React.FC<Props> = ({
             <div className="p-3.5 rounded-2xl bg-purple-950/40 border border-purple-500/30 flex items-start gap-3">
               <Sparkles size={20} className="text-purple-400 shrink-0 mt-0.5" />
               <div className="flex-1">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-purple-200">
-                    Nova versão: {release.tagName}
-                  </h3>
-                  <button
-                    onClick={handleCopyLink}
-                    className="text-[11px] text-purple-400 hover:text-purple-300 flex items-center gap-1 font-mono cursor-pointer"
-                  >
-                    {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
-                    <span>{copied ? 'Copiado!' : 'Copiar Link'}</span>
-                  </button>
-                </div>
+                <h3 className="text-sm font-semibold text-purple-200">
+                  Nova versão disponível: {release.tagName}
+                </h3>
                 <p className="text-[11px] text-gray-400 mt-0.5">Lançada em {release.publishedAt}</p>
               </div>
             </div>
 
-            <div className="bg-background/60 border border-purple-900/30 rounded-xl p-3 max-h-40 overflow-y-auto">
+            <div className="bg-background/60 border border-purple-900/30 rounded-xl p-3 max-h-36 overflow-y-auto">
               <span className="text-[11px] font-semibold text-purple-300 block mb-1">Notas da Versão:</span>
               <p className="text-xs text-gray-300 whitespace-pre-wrap leading-relaxed font-mono">
                 {release.body}
               </p>
             </div>
 
-            <button
-              onClick={handleDownload}
-              disabled={isOpening}
-              className="w-full flex items-center justify-center gap-2 bg-linear-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white font-semibold py-2.5 rounded-xl transition text-sm shadow-lg shadow-purple-950/60 cursor-pointer disabled:opacity-60"
-            >
-              <Download size={16} />
-              <span>Baixar Atualização ({release.tagName})</span>
-              <ExternalLink size={14} className="opacity-70" />
-            </button>
+            {/* Barra de Progresso durante Download */}
+            {downloading && (
+              <div className="space-y-2 py-2">
+                <div className="flex justify-between text-xs text-purple-300 font-mono">
+                  <span>{statusText}</span>
+                  <span>{progress}%</span>
+                </div>
+                <div className="w-full bg-background border border-purple-900/40 rounded-full h-2.5 overflow-hidden">
+                  <div
+                    className="bg-linear-to-r from-purple-600 to-indigo-500 h-full transition-all duration-300 rounded-full"
+                    style={{ width: `${progress}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Botão de Ação */}
+            {!downloading ? (
+              <button
+                onClick={handleInstallUpdate}
+                className="w-full flex items-center justify-center gap-2 bg-linear-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white font-semibold py-2.5 rounded-xl transition text-sm shadow-lg shadow-purple-950/60 cursor-pointer"
+              >
+                <Download size={16} />
+                <span>Atualizar Automaticamente ({release.tagName})</span>
+              </button>
+            ) : downloadComplete ? (
+              <div className="p-2.5 bg-emerald-950/40 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 flex items-center justify-center gap-2">
+                <RotateCcw size={14} className="animate-spin" />
+                <span>Reiniciando aplicativo...</span>
+              </div>
+            ) : null}
           </div>
         ) : (
           <div className="py-6 flex flex-col items-center justify-center text-center space-y-3">

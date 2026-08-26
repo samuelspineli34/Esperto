@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Esperto",
-  "version": "1.1.0",
+  "version": "0.1.0",
   "identifier": "com.samuelspineli.esperto",
   "build": {
     "frontendDist": "../dist",
@@ -22,19 +22,25 @@
         "resizable": true
       }
     ]
-  },  
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "COLE_SUA_CHAVE_PUBLICA_AQUI",
+      "endpoints": [
+        "https://github.com/samuelspineli34/Esperto/releases/latest/download/latest.json"
+      ]
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ],
-    "android": {
-      "debugApplicationIdSuffix": ".debug"
-    }
+    ]
   }
 }
