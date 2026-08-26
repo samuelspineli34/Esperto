@@ -97,42 +97,54 @@ Ensure the following tools are installed on your machine:
    git clone https://github.com/samuelspineli34/Esperto.git
    cd Esperto
 
-2.  Install dependencies:
+2. **Install dependencies:**
    ```bash
     npm install
    ```
 
-3.  Start development mode with hot-reload:
+3. **Start development mode with hot-reload:**
    ```bash
     npm run tauri:dev
    ```
+---
 
-Production Build
+## Production Build
 
-To compile optimized binaries for your current operating system:
+To compile optimized binaries for your operating system:
+
 ```bash
 npm run tauri:build
 ```
-Compiled deliverables will be generated in src-tauri/target/release/bundle/:
 
-  - Windows: .exe (NSIS installer) and .msi
-  - Linux: .deb and .AppImage
-  - macOS: .dmg and .app
+Compiled deliverables will be generated in `src-tauri/target/release/bundle/`:
+- **Windows:** `.exe` (NSIS installer) and `.msi`
+- **Linux:** `.deb` and `.AppImage`
+- **macOS:** `.dmg` and `.app`
 
-API Provider Configuration
+---
 
-Esperto operates under a BYOK (Bring Your Own Key) model. Obtain your keys
-directly from provider dashboards:
+## API Provider Configuration
 
-  - Google AI Studio
-  - OpenRouter
-  - DeepSeek Platform
-  - Anthropic Console
-  - OpenAI Platform
-  - Ollama (Local instance running on default port 11434)
+Esperto operates under a **BYOK (Bring Your Own Key)** model. Obtain your keys directly from the respective provider dashboards:
+- [Google AI Studio](https://aistudio.google.com/)
+- [OpenRouter](https://openrouter.ai/keys)
+- [DeepSeek Platform](https://platform.deepseek.com/)
+- [Anthropic Console](https://console.anthropic.com/)
+- [OpenAI Platform](https://platform.openai.com/)
+- [Ollama](https://ollama.com/) (Local instance running on default port `11434`)
 
-API keys are stored exclusively in local application storage.
+API keys are stored exclusively in your local application storage.
 
-License
+---
 
-Distributed under the MIT License. See LICENSE for details.
+## License
+
+<p align="left">
+  This project is open-source and available under the terms of the <a href="LICENSE">MIT License</a>.
+</p>
+
+---
+
+<div align="center">
+  <sub style="color: #71717a;">Built with Tauri v2, React, and TypeScript. Maintained by <a href="https://www.linkedin.com/in/samuel-spineli/">Samuel Spineli</a> • 2026</sub>
+</div>
