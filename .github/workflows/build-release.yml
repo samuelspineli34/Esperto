@@ -1,4 +1,4 @@
-name: Release Multiplataforma Automatica
+name: Compilar Esperto Desktop
 
 on:
   push:
@@ -8,13 +8,8 @@ on:
 permissions:
   contents: write
 
-# Cancela automaticamente execuções antigas que ficaram presas na fila
-concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  # 1. Cria a tag de versão e a Release no GitHub
+  # 1. Cria a tag de versão e a Release
   create-release:
     runs-on: ubuntu-latest
     outputs:
@@ -24,8 +19,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Gera automaticamente tags sequenciais (v0.1.0 -> v0.1.1)
-      - name: Gerar Tag de Versão
+      - name: Gerar Tag de Versao
         id: tag_version
         uses: anothrNick/github-tag-action@1.71.0
         env:
@@ -33,8 +27,7 @@ jobs:
           WITH_V: true
           DEFAULT_BUMP: patch
 
-      # Cria a publicação de Release no GitHub
-      - name: Criar Release
+      - name: Criar Release no GitHub
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag_version.outputs.new_tag }}
@@ -45,30 +38,26 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # 2. Compila estritamente em ordem: 1º Windows -> 2º Linux -> 3º Mac
+  # 2. Compila Windows e Linux
   build-binaries:
     needs: create-release
     strategy:
-      max-parallel: 1 # Garante que roda um de cada vez na ordem exata
       fail-fast: false
       matrix:
         include:
           - os: windows-latest
-            name: Windows (1º)
+            name: Windows
           - os: ubuntu-latest
-            name: Linux (2º)
-          - os: macos-latest
-            name: macOS (3º)
+            name: Linux
 
     runs-on: ${{ matrix.os }}
     name: Build - ${{ matrix.name }}
 
     steps:
-      - name: Baixar código
+      - name: Baixar codigo
         uses: actions/checkout@v4
 
-      # Dependências exclusivas do Linux
-      - name: Instalar Dependências (Linux)
+      - name: Instalar Dependencias (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
@@ -78,26 +67,22 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'npm'
 
       - name: Instalar Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Instalar Dependências do Projeto
+      - name: Instalar Dependencias do Projeto
         run: npm install
 
-      # Injeta a versão dinâmica nos arquivos de configuração
-      - name: Sincronizar Versão Dinâmica
+      - name: Sincronizar Versao Dinamica
         shell: bash
         run: |
           TAG="${{ needs.create-release.outputs.new_version }}"
           CLEAN_VERSION="${TAG#v}"
-          echo "Injetando versao: $CLEAN_VERSION (Tag: $TAG)"
+          echo "Injetando versao: $CLEAN_VERSION"
 
-          # Atualiza package.json
           npm version "$CLEAN_VERSION" --no-git-tag-version --allow-same-version
 
-          # Atualiza tauri.conf.json
           node -e "
             const fs = require('fs');
             const path = './src-tauri/tauri.conf.json';
@@ -113,7 +98,6 @@ jobs:
         env:
           APP_VERSION: ${{ needs.create-release.outputs.new_version }}
 
-      # Anexa os instaladores gerados diretamente na Release criada
       - name: Anexar Instaladores na Release
         uses: softprops/action-gh-release@v2
         with:
@@ -123,6 +107,5 @@ jobs:
             src-tauri/target/release/bundle/msi/*.msi
             src-tauri/target/release/bundle/deb/*.deb
             src-tauri/target/release/bundle/appimage/*.AppImage
-            src-tauri/target/release/bundle/dmg/*.dmg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
