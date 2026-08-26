@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, MessageSquare, Settings as SettingsIcon, Trash2, Copy, Eye, RefreshCw, Pencil, Check, X } from 'lucide-react';
+import { Plus, MessageSquare, Settings as SettingsIcon, Trash2, Copy, Eye, RefreshCw, Pencil, Check, X, HelpCircle } from 'lucide-react';
 import { Chat } from '../lib/db';
 import { CURRENT_VERSION } from '../services/updater';
 
@@ -12,6 +12,7 @@ interface Props {
   onRenameChat: (id: string, newTitle: string) => void;
   onDeleteChat: (id: string, e: React.MouseEvent) => void;
   onOpenSettings: () => void;
+  onOpenHelp: () => void;
   onCheckUpdate: () => void;
 }
 
@@ -24,6 +25,7 @@ export const Sidebar: React.FC<Props> = ({
   onRenameChat,
   onDeleteChat,
   onOpenSettings,
+  onOpenHelp,
   onCheckUpdate,
 }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -50,24 +52,33 @@ export const Sidebar: React.FC<Props> = ({
           <div className="w-7 h-7 rounded-lg bg-purple-900/50 border border-purple-500/40 flex items-center justify-center text-purple-300">
             <Eye size={16} />
           </div>
-          <span className="font-bold text-sm tracking-wider bg-gradient-to-r from-purple-300 to-indigo-200 bg-clip-text text-transparent">
+          <span className="font-bold text-sm tracking-wider bg-linear-to-r from-purple-300 to-indigo-200 bg-clip-text text-transparent">
             ESPERTO
           </span>
         </div>
 
-        <button
-          onClick={onCheckUpdate}
-          title="Verificar atualizações"
-          className="text-gray-500 hover:text-purple-300 transition p-1 cursor-pointer"
-        >
-          <RefreshCw size={14} />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={onOpenHelp}
+            title="Central de Ajuda & Chaves"
+            className="text-gray-500 hover:text-purple-300 transition p-1 cursor-pointer"
+          >
+            <HelpCircle size={15} />
+          </button>
+          <button
+            onClick={onCheckUpdate}
+            title="Verificar atualizações"
+            className="text-gray-500 hover:text-purple-300 transition p-1 cursor-pointer"
+          >
+            <RefreshCw size={14} />
+          </button>
+        </div>
       </div>
 
       <div className="p-3">
         <button
           onClick={onNewChat}
-          className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white font-medium py-2.5 px-4 rounded-xl transition shadow-md shadow-purple-950/50 text-sm cursor-pointer"
+          className="w-full flex items-center justify-center gap-2 bg-linear-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white font-medium py-2.5 px-4 rounded-xl transition shadow-md shadow-purple-950/50 text-sm cursor-pointer"
         >
           <Plus size={18} />
           <span>Novo Chat</span>

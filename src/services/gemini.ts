@@ -18,6 +18,9 @@ interface StreamOptions {
   signal?: AbortSignal;
 }
 
+// Função auxiliar para aguardar milissegundos
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export async function* streamGemini({
   apiKey,
   model,
@@ -41,7 +44,10 @@ export async function* streamGemini({
   const selectedModel = model.trim() || 'gemini-3.7-flash';
   const ai = new GoogleGenAI({ apiKey: apiKey.trim() });
 
-  const contents = history.map((msg) => {
+  // Janela deslizante: limita o histórico enviado a no máximo as últimas 10 mensagens para economizar cota TPM
+  const boundedHistory = history.slice(-10);
+
+  const contents = boundedHistory.map((msg) => {
     const parts: any[] = [{ text: msg.content }];
     if (msg.attachments) {
       msg.attachments.forEach((att) => {
@@ -75,44 +81,55 @@ export async function* streamGemini({
   });
 
   const config: any = {
-    systemInstruction: systemInstruction || 'Você é o Esperto, uma entidade oracular de inteligência e sabedoria.',
+    systemInstruction: systemInstruction || 'Você é o Esperto, um assistente desktop de inteligência artificial de alta performance.',
     temperature,
     topP,
   };
 
   if (maxOutputTokens) config.maxOutputTokens = maxOutputTokens;
-
-  // Thinking Config (Gemini 3.7 Flash)
   if (thinkingLevel !== 'off' || thinkingBudget) {
     config.thinkingConfig = {
       thinkingBudget: thinkingBudget || (thinkingLevel === 'high' ? 8192 : thinkingLevel === 'medium' ? 2048 : 1024),
     };
   }
-
-  if (googleSearch) {
-    config.tools = [{ googleSearch: {} }];
-  }
-
+  if (googleSearch) config.tools = [{ googleSearch: {} }];
   if (mediaResolution && mediaResolution !== 'default') {
     config.mediaResolution = `MEDIA_RESOLUTION_${mediaResolution.toUpperCase()}`;
   }
 
-  try {
-    const responseStream = await ai.models.generateContentStream({
-      model: selectedModel,
-      contents,
-      config,
-    });
+  // AUTO-RETRY: Tenta até 3 vezes caso o Google dê erro 429 ou 503 temporário
+  let attempts = 0;
+  const maxAttempts = 3;
 
-    for await (const chunk of responseStream) {
-      if (signal?.aborted) break;
-      if (chunk.text) {
-        yield chunk.text;
+  while (attempts < maxAttempts) {
+    try {
+      const responseStream = await ai.models.generateContentStream({
+        model: selectedModel,
+        contents,
+        config,
+      });
+
+      for await (const chunk of responseStream) {
+        if (signal?.aborted) break;
+        if (chunk.text) {
+          yield chunk.text;
+        }
       }
+      return; // Sucesso, encerra o gerador
+    } catch (err: any) {
+      if (signal?.aborted) return;
+      attempts++;
+      const errMessage = err?.message || JSON.stringify(err);
+
+      // Se for erro de cota por minuto (429) ou sobrecarga (503), aguarda e tenta novamente
+      if ((errMessage.includes('429') || errMessage.includes('503') || errMessage.includes('RESOURCE_EXHAUSTED')) && attempts < maxAttempts) {
+        // Aguarda 4 segundos antes de retentar
+        yield `\n\n*(Aguardando cota da API gratuita liberar em instantes...)*\n\n`;
+        await sleep(4500);
+        continue;
+      }
+
+      throw new Error(`Erro Gemini: ${errMessage}`);
     }
-  } catch (err: any) {
-    if (signal?.aborted) return;
-    const errMessage = err?.message || JSON.stringify(err);
-    throw new Error(`Erro Gemini: ${errMessage}`);
   }
 }

@@ -8,6 +8,7 @@ interface Props {
 }
 
 const providerColors: Record<string, { badge: string; border: string }> = {
+  openrouter: { badge: 'bg-violet-950/70 text-violet-300 border-violet-800/40', border: 'hover:border-violet-500/40' },
   gemini: { badge: 'bg-blue-950/70 text-blue-300 border-blue-800/40', border: 'hover:border-blue-500/40' },
   anthropic: { badge: 'bg-amber-950/70 text-amber-300 border-amber-800/40', border: 'hover:border-amber-500/40' },
   openai: { badge: 'bg-emerald-950/70 text-emerald-300 border-emerald-800/40', border: 'hover:border-emerald-500/40' },

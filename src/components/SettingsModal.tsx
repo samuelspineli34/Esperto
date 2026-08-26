@@ -22,29 +22,31 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings: init
   return (
     <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
       <div className="bg-surface border border-purple-900/40 rounded-3xl w-full max-w-4xl p-6 relative shadow-2xl shadow-purple-950/80 max-h-[92vh] flex flex-col">
+        {/* Botão Fechar */}
         <button
           onClick={onClose}
           className="absolute top-5 right-5 text-gray-400 hover:text-white p-1 rounded-lg hover:bg-surfaceHover transition cursor-pointer"
         >
           <X size={20} />
         </button>
-        
+
+        {/* Cabeçalho */}
         <div className="flex items-center gap-2.5 mb-5 pb-3 border-b border-purple-950/40">
           <div className="p-2 rounded-xl bg-purple-900/40 text-purple-300 border border-purple-500/30 shadow-inner">
             <Eye size={20} />
           </div>
           <div>
             <h2 className="text-base font-bold text-white tracking-wide">Configurações & Parâmetros dos Modelos</h2>
-            <p className="text-xs text-purple-300/60">Controles de raciocínio, temperatura, busca e memória.</p>
+            <p className="text-xs text-purple-300/60">Controles de raciocínio, temperatura, busca, chaves e memória.</p>
           </div>
         </div>
 
+        {/* Conteúdo em 2 Colunas */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 overflow-y-auto flex-1 pr-1">
-          
-          {/* COLUNA ESQUERDA: Modelos e Parâmetros */}
+          {/* COLUNA ESQUERDA: Modelos e Chaves */}
           <div className="space-y-4 flex flex-col">
             <div>
-              <label className="block text-xs font-semibold text-purple-200 mb-2 flex items-center gap-1.5">
+              <label className="text-xs font-semibold text-purple-200 mb-2 flex items-center gap-1.5">
                 <Sparkles size={13} className="text-purple-400" />
                 <span>Modelo Ativo</span>
               </label>
@@ -56,7 +58,7 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings: init
 
             {/* Parâmetros Avançados */}
             <div className="p-3.5 bg-background/50 border border-purple-900/30 rounded-2xl space-y-3">
-              <span className="text-xs font-bold text-purple-200 block flex items-center gap-1.5">
+              <span className="text-xs font-bold text-purple-200 flex items-center gap-1.5">
                 <Sliders size={13} className="text-purple-400" />
                 <span>Parâmetros de Inferência</span>
               </span>
@@ -78,7 +80,7 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings: init
                 />
               </div>
 
-              {/* Thinking Level / Raciocínio */}
+              {/* Thinking Level & Resolução */}
               <div className="grid grid-cols-2 gap-2 pt-1">
                 <div>
                   <label className="text-[11px] font-medium text-purple-300 mb-1 flex items-center gap-1">
@@ -97,7 +99,6 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings: init
                   </select>
                 </div>
 
-                {/* Resolução de Mídia */}
                 <div>
                   <label className="text-[11px] font-medium text-purple-300 mb-1 flex items-center gap-1">
                     <Image size={11} />
@@ -109,7 +110,7 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings: init
                     className="w-full bg-surface border border-purple-900/40 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-purple-500"
                   >
                     <option value="default">Default</option>
-                    <option value="low">Low (Poucos tokens)</option>
+                    <option value="low">Low (Econômico)</option>
                     <option value="high">High (Detalhado)</option>
                   </select>
                 </div>
@@ -136,41 +137,80 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings: init
             <div className="pt-2 border-t border-purple-950/40 space-y-2">
               <div className="flex items-center gap-1.5">
                 <Key size={13} className="text-purple-400" />
-                <label className="block text-xs font-semibold text-purple-200">Chaves de API</label>
+                <label className="text-xs font-semibold text-purple-200">Chaves de API</label>
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-[10px] font-medium text-blue-300 mb-0.5">Gemini API Key</label>
+              <div className="space-y-2">
+                <div className="p-2.5 bg-violet-950/30 border border-violet-800/40 rounded-xl">
+                  <label className="block text-[11px] font-bold text-violet-300 mb-1">
+                    OpenRouter API Key (Hub Universal)
+                  </label>
                   <input
                     type="password"
-                    value={form.geminiApiKey || ''}
-                    onChange={(e) => setForm((prev) => ({ ...prev, geminiApiKey: e.target.value }))}
-                    placeholder="AIzaSy..."
-                    className="w-full bg-background border border-blue-900/30 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                    value={form.openrouterApiKey || ''}
+                    onChange={(e) => setForm((prev) => ({ ...prev, openrouterApiKey: e.target.value }))}
+                    placeholder="sk-or-v1-..."
+                    className="w-full bg-background border border-violet-900/50 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-violet-500"
                   />
                 </div>
 
-                <div>
-                  <label className="block text-[10px] font-medium text-amber-300 mb-0.5">Claude API Key</label>
-                  <input
-                    type="password"
-                    value={form.anthropicApiKey || ''}
-                    onChange={(e) => setForm((prev) => ({ ...prev, anthropicApiKey: e.target.value }))}
-                    placeholder="sk-ant-..."
-                    className="w-full bg-background border border-amber-900/30 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500"
-                  />
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] font-medium text-blue-300 mb-0.5">Gemini API Key</label>
+                    <input
+                      type="password"
+                      value={form.geminiApiKey || ''}
+                      onChange={(e) => setForm((prev) => ({ ...prev, geminiApiKey: e.target.value }))}
+                      placeholder="AIzaSy..."
+                      className="w-full bg-background border border-blue-900/30 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-medium text-amber-300 mb-0.5">Claude API Key</label>
+                    <input
+                      type="password"
+                      value={form.anthropicApiKey || ''}
+                      onChange={(e) => setForm((prev) => ({ ...prev, anthropicApiKey: e.target.value }))}
+                      placeholder="sk-ant-..."
+                      className="w-full bg-background border border-amber-900/30 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] font-medium text-emerald-300 mb-0.5">OpenAI API Key</label>
+                    <input
+                      type="password"
+                      value={form.openaiApiKey || ''}
+                      onChange={(e) => setForm((prev) => ({ ...prev, openaiApiKey: e.target.value }))}
+                      placeholder="sk-proj-..."
+                      className="w-full bg-background border border-emerald-900/30 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-medium text-cyan-300 mb-0.5">DeepSeek API Key</label>
+                    <input
+                      type="password"
+                      value={form.deepseekApiKey || ''}
+                      onChange={(e) => setForm((prev) => ({ ...prev, deepseekApiKey: e.target.value }))}
+                      placeholder="sk-..."
+                      className="w-full bg-background border border-cyan-900/30 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500"
+                    />
+                  </div>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* COLUNA DIREITA: Grimório Global */}
+          {/* COLUNA DIREITA: Memória Permanente */}
           <div className="flex flex-col bg-background/50 border border-purple-900/30 rounded-2xl p-4">
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-1.5">
                 <BookOpen size={15} className="text-purple-400" />
-                <label className="block text-xs font-bold text-purple-200">Grimório Global (Memória Permanente)</label>
+                <label className="text-xs font-bold text-purple-200">Memória Permanente do Usuário</label>
               </div>
               {form.globalMemory && (
                 <button
@@ -188,19 +228,19 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings: init
               value={form.globalMemory || ''}
               onChange={(e) => setForm((prev) => ({ ...prev, globalMemory: e.target.value }))}
               placeholder="Fatos e preferências permanentes lembrados por todos os modelos..."
-              className="flex-1 w-full min-h-[260px] bg-background border border-purple-900/40 rounded-xl p-3 text-xs text-purple-100 placeholder-gray-600 focus:outline-none focus:border-purple-500 resize-none font-mono leading-relaxed"
+              className="flex-1 w-full min-h-65 bg-background border border-purple-900/40 rounded-xl p-3 text-xs text-purple-100 placeholder-gray-600 focus:outline-none focus:border-purple-500 resize-none font-mono leading-relaxed"
             />
           </div>
-
         </div>
 
+        {/* Botão Salvar */}
         <div className="pt-4 mt-4 border-t border-purple-950/40 flex justify-center">
           <button
             onClick={() => {
               onSave(form);
               onClose();
             }}
-            className="bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white font-semibold px-8 py-2 rounded-xl transition text-xs shadow-md shadow-purple-950/50 cursor-pointer"
+            className="bg-linear-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white font-semibold px-8 py-2 rounded-xl transition text-xs shadow-md shadow-purple-950/50 cursor-pointer"
           >
             Salvar
           </button>

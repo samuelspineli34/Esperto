@@ -8,6 +8,13 @@ export interface Attachment {
   isSnippet?: boolean;
 }
 
+export interface WorkspacePreset {
+  id: string;
+  name: string; // Ex: "Projeto Esperto Desktop", "Backend API"
+  paths: string[];
+  createdAt: number;
+}
+
 export interface Chat {
   id: string;
   title: string;
@@ -35,8 +42,9 @@ export interface Settings {
   openaiApiKey?: string;
   anthropicApiKey?: string;
   deepseekApiKey?: string;
+  openrouterApiKey?: string;
   
-  // Parâmetros de IA Avançados:
+  // Parâmetros avançados
   temperature?: number;
   topP?: number;
   maxOutputTokens?: number;
@@ -46,17 +54,19 @@ export interface Settings {
   googleSearch?: boolean;
 }
 
-class EspertoDatabase extends Dexie {
-  chats!: Table<Chat>;
-  messages!: Table<Message>;
-  settings!: Table<Settings>;
+export class EspertoDatabase extends Dexie {
+  chats!: Table<Chat, string>;
+  messages!: Table<Message, number>;
+  settings!: Table<Settings, string>;
+  presets!: Table<WorkspacePreset, string>; // <--- Tabela de Predefinições
 
   constructor() {
     super('EspertoDB');
-    this.version(1).stores({
+    this.version(2).stores({
       chats: 'id, createdAt',
       messages: '++id, chatId, timestamp',
-      settings: 'id'
+      settings: 'id',
+      presets: 'id, createdAt',
     });
   }
 }

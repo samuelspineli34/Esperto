@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { Eye, User, FileText, Copy, Check, Pencil, RotateCcw, AlertTriangle } from 'lucide-react';
+import { Eye, User, FileText, Copy, Check, Pencil, RotateCcw, AlertTriangle, Play } from 'lucide-react';
 import { Attachment } from '../lib/db';
 
 interface Props {
@@ -11,16 +11,83 @@ interface Props {
   attachments?: Attachment[];
   onEdit?: (newContent: string) => void;
   onRetry?: () => void;
+  onOpenArtifact?: (code: string, language: string) => void;
 }
 
-export const ChatMessage: React.FC<Props> = ({ role, content, attachments, onEdit, onRetry }) => {
+// Componente para cada bloco de código com botão de copiar individual
+const CodeBlock: React.FC<{ language: string; codeString: string; onOpenArtifact?: (code: string, lang: string) => void }> = ({
+  language,
+  codeString,
+  onOpenArtifact,
+}) => {
+  const [copied, setCopied] = useState(false);
+  const isPreviewable = ['html', 'svg', 'xml', 'jsx', 'tsx'].includes(language);
+
+  const handleCopyCode = () => {
+    navigator.clipboard.writeText(codeString);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="relative my-3 rounded-2xl overflow-hidden border border-purple-900/40 bg-[#0d1117] shadow-lg">
+      {/* Cabeçalho do Bloco de Código */}
+      <div className="flex items-center justify-between px-4 py-1.5 bg-surface border-b border-purple-950/40 select-none">
+        <span className="text-[11px] font-mono font-bold text-purple-300 uppercase tracking-wider">
+          {language || 'código'}
+        </span>
+
+        <div className="flex items-center gap-2">
+          {isPreviewable && onOpenArtifact && (
+            <button
+              onClick={() => onOpenArtifact(codeString, language)}
+              className="bg-purple-950/80 hover:bg-purple-900 border border-purple-500/40 text-purple-300 text-[11px] font-semibold px-2 py-0.5 rounded-lg transition flex items-center gap-1 cursor-pointer"
+              title="Abrir prévia interativa"
+            >
+              <Play size={11} />
+              <span>Preview</span>
+            </button>
+          )}
+
+          <button
+            onClick={handleCopyCode}
+            className="text-gray-400 hover:text-purple-300 text-[11px] font-mono flex items-center gap-1 transition cursor-pointer p-1 rounded hover:bg-surfaceHover"
+            title="Copiar apenas este código"
+          >
+            {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+            <span>{copied ? 'Copiado!' : 'Copiar código'}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Conteúdo do Código */}
+      <SyntaxHighlighter
+        PreTag="div"
+        language={language}
+        style={vscDarkPlus as any}
+        customStyle={{ margin: 0, padding: '1rem', background: 'transparent', fontSize: '0.82rem' }}
+      >
+        {codeString}
+      </SyntaxHighlighter>
+    </div>
+  );
+};
+
+export const ChatMessage: React.FC<Props> = ({
+  role,
+  content,
+  attachments,
+  onEdit,
+  onRetry,
+  onOpenArtifact,
+}) => {
   const isBot = role === 'model';
   const isError = isBot && (content.startsWith('⚠️') || content.includes('Erro:'));
   const [copied, setCopied] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(content);
 
-  const handleCopy = () => {
+  const handleCopyMessage = () => {
     navigator.clipboard.writeText(content);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -40,7 +107,7 @@ export const ChatMessage: React.FC<Props> = ({ role, content, attachments, onEdi
           isError
             ? 'bg-red-950 text-red-400 border border-red-800/50'
             : isBot
-            ? 'bg-gradient-to-br from-purple-700 via-indigo-800 to-black text-purple-200 border border-purple-500/30'
+            ? 'bg-linear-to-br from-purple-700 via-indigo-800 to-black text-purple-200 border border-purple-500/30'
             : 'bg-gray-800 text-gray-300 border border-gray-700'
         }`}
       >
@@ -48,7 +115,6 @@ export const ChatMessage: React.FC<Props> = ({ role, content, attachments, onEdi
       </div>
 
       <div className="flex-1 overflow-hidden select-text leading-relaxed text-sm text-gray-200">
-        {/* Renderiza Anexos */}
         {attachments && attachments.length > 0 && (
           <div className="flex flex-wrap gap-2 mb-3">
             {attachments.map((att, idx) => {
@@ -60,7 +126,7 @@ export const ChatMessage: React.FC<Props> = ({ role, content, attachments, onEdi
               ) : (
                 <div key={idx} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-950/50 border border-purple-800/40 text-xs text-purple-200">
                   <FileText size={14} className="text-purple-400" />
-                  <span className="truncate max-w-[180px]">{att.name}</span>
+                  <span className="truncate max-w-45">{att.name}</span>
                 </div>
               );
             })}
@@ -100,15 +166,15 @@ export const ChatMessage: React.FC<Props> = ({ role, content, attachments, onEdi
                 code(props) {
                   const { children, className, node, ref, ...rest } = props as any;
                   const match = /language-(\w+)/.exec(className || '');
+                  const lang = match ? match[1].toLowerCase() : '';
+                  const codeString = String(children).replace(/\n$/, '');
+
                   return match ? (
-                    <SyntaxHighlighter
-                      PreTag="div"
-                      language={match[1]}
-                      style={vscDarkPlus as any}
-                      className="rounded-xl my-2 border border-purple-900/30"
-                    >
-                      {String(children).replace(/\n$/, '')}
-                    </SyntaxHighlighter>
+                    <CodeBlock
+                      language={lang}
+                      codeString={codeString}
+                      onOpenArtifact={onOpenArtifact}
+                    />
                   ) : (
                     <code {...rest} className="bg-surface px-1.5 py-0.5 rounded text-purple-300 font-mono text-xs border border-purple-900/40">
                       {children}
@@ -122,17 +188,16 @@ export const ChatMessage: React.FC<Props> = ({ role, content, attachments, onEdi
           </div>
         )}
 
-        {/* Barra de Ações Rápidas da Mensagem */}
         {!isEditing && (
           <div className="flex items-center gap-3 mt-2.5 select-none">
             {!isError && (
               <button
-                onClick={handleCopy}
+                onClick={handleCopyMessage}
                 className="text-gray-500 hover:text-purple-300 transition text-xs flex items-center gap-1 cursor-pointer"
-                title="Copiar mensagem"
+                title="Copiar mensagem inteira"
               >
                 {copied ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
-                <span className="text-[11px]">{copied ? 'Copiado' : 'Copiar'}</span>
+                <span className="text-[11px]">{copied ? 'Copiado' : 'Copiar conversa'}</span>
               </button>
             )}
 

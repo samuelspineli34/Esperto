@@ -102,7 +102,7 @@ export const UpdateModal: React.FC<Props> = ({
             <button
               onClick={handleDownload}
               disabled={isOpening}
-              className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white font-semibold py-2.5 rounded-xl transition text-sm shadow-lg shadow-purple-950/60 cursor-pointer disabled:opacity-60"
+              className="w-full flex items-center justify-center gap-2 bg-linear-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white font-semibold py-2.5 rounded-xl transition text-sm shadow-lg shadow-purple-950/60 cursor-pointer disabled:opacity-60"
             >
               <Download size={16} />
               <span>Baixar Atualização ({release.tagName})</span>
