@@ -25,7 +25,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhGQzcxMDY1NjRCRTkzNTEKUldSUms3NWtaUkRIait1ZTJuSFA5aFVObXVFbDArQU8wdlhzaHdWZEdsRXpOcTBDWkVMU1p0RHUK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkxOEM3QUI1QTBBRUE2MjgKUldRb3BxNmd0WHFNa2UxZmhneW1SS2FEUHhhTWlNaXFqNzJVaUcrZElSUjNMck9hamZ4MGhIYXcK",
       "endpoints": [
         "https://github.com/samuelspineli34/Esperto/releases/latest/download/latest.json"
       ]
