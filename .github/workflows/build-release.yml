@@ -8,6 +8,7 @@ on:
 permissions:
   actions: read
   contents: write
+  id-token: write
 
 # Cancela automaticamente execucoes anteriores se houver novo commit
 concurrency:
@@ -133,7 +134,6 @@ jobs:
       - name: Assinar executavel com SignPath
         if: matrix.os == 'windows-latest' && steps.check-secrets.outputs.signing-available == 'true'
         id: sign-exe
-        continue-on-error: true
         uses: signpath/github-action-submit-signing-request@v2
         with:
           api-token: '${{ secrets.SIGNPATH_API_TOKEN }}'
@@ -144,6 +144,7 @@ jobs:
           github-artifact-id: '${{ steps.upload-unsigned.outputs.artifact-id }}'
           wait-for-completion: true
           output-artifact-directory: 'windows-signed-exe'
+          github-token: '${{ secrets.GITHUB_TOKEN }}'
 
       - name: Relatório de Assinatura
         if: matrix.os == 'windows-latest'
