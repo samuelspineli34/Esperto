@@ -107,37 +107,43 @@ jobs:
           APP_VERSION: ${{ needs.create-release.outputs.new_version }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
 
-      # Gera o manifesto latest.json para o auto-updater
+      # Gera o manifesto latest.json em Node.js de forma 100% segura
       - name: Gerar manifesto latest.json (Windows)
         if: matrix.os == 'windows-latest'
-        shell: bash
         run: |
-          TAG="${{ needs.create-release.outputs.new_version }}"
-          CLEAN_VERSION="${TAG#v}"
-          
-          # Procura o arquivo .sig gerado no Windows
-          SIG_FILE=$(ls src-tauri/target/release/bundle/nsis/*.nsis.zip.sig 2>/dev/null | head -n 1)
-          if [ -f "$SIG_FILE" ]; then
-            SIGNATURE=$(cat "$SIG_FILE")
-            ZIP_NAME=$(basename "$SIG_FILE" .sig)
+          node -e "
+            const fs = require('fs');
+            const path = require('path');
+            const tag = process.env.TAG;
+            const cleanVersion = (tag || '').replace(/^v/, '');
+            const nsisDir = './src-tauri/target/release/bundle/nsis';
             
-            cat <<EOF > latest.json
-          {
-            "version": "$CLEAN_VERSION",
-            "notes": "Atualizacao automatica do Esperto para a versao $TAG",
-            "pub_date": "$(date -u +'%Y-%m-%dT%H:%M:%SZ')",
-            "platforms": {
-              "windows-x86_64": {
-                "signature": "$SIGNATURE",
-                "url": "https://github.com/samuelspineli34/Esperto/releases/download/$TAG/$ZIP_NAME"
+            if (fs.existsSync(nsisDir)) {
+              const files = fs.readdirSync(nsisDir);
+              const sigFile = files.find(f => f.endsWith('.nsis.zip.sig') || f.endsWith('.zip.sig'));
+              if (sigFile) {
+                const sigContent = fs.readFileSync(path.join(nsisDir, sigFile), 'utf8').trim();
+                const zipName = sigFile.replace('.sig', '');
+                const manifest = {
+                  version: cleanVersion,
+                  notes: 'Atualizacao automatica do Esperto para a versao ' + tag,
+                  pub_date: new Date().toISOString(),
+                  platforms: {
+                    'windows-x86_64': {
+                      signature: sigContent,
+                      url: 'https://github.com/samuelspineli34/Esperto/releases/download/' + tag + '/' + zipName
+                    }
+                  }
+                };
+                fs.writeFileSync('latest.json', JSON.stringify(manifest, null, 2));
+                console.log('latest.json gerado com sucesso!');
               }
             }
-          }
-          EOF
-            echo "latest.json gerado com sucesso!"
-          fi
+          "
+        env:
+          TAG: ${{ needs.create-release.outputs.new_version }}
 
-      # Anexa todos os instaladores e pacotes de atualizacao (.sig, .zip e latest.json)
+      # Anexa os instaladores e o manifesto na Release
       - name: Anexar Instaladores e Updater na Release
         uses: softprops/action-gh-release@v2
         with:
@@ -154,6 +160,6 @@ jobs:
             src-tauri/target/release/bundle/dmg/*.dmg
             src-tauri/target/release/bundle/macos/*.tar.gz
             src-tauri/target/release/bundle/macos/*.sig
-            latest.json
+            latest*.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
