@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { X, Sparkles, Download, CheckCircle2, RefreshCw, RotateCcw } from 'lucide-react';
+import { X, Sparkles, Download, CheckCircle2, RefreshCw, RotateCcw, ExternalLink } from 'lucide-react';
 import { check } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
+import { invoke } from '@tauri-apps/api/core';
 import { ReleaseInfo, CURRENT_VERSION } from '../services/updater';
 
 interface Props {
@@ -23,17 +24,20 @@ export const UpdateModal: React.FC<Props> = ({
   const [progress, setProgress] = useState(0);
   const [downloadComplete, setDownloadComplete] = useState(false);
   const [statusText, setStatusText] = useState('');
+  const [updateError, setUpdateError] = useState(false);
 
   if (!isOpen) return null;
 
   const handleInstallUpdate = async () => {
     try {
       setDownloading(true);
+      setUpdateError(false);
       setStatusText('Buscando pacote de atualização...');
 
       const update = await check();
       if (!update) {
-        setStatusText('Nenhuma atualização pendente encontrada.');
+        setStatusText('Instalação manual necessária para esta versão.');
+        setUpdateError(true);
         setDownloading(false);
         return;
       }
@@ -41,7 +45,6 @@ export const UpdateModal: React.FC<Props> = ({
       let downloaded = 0;
       let contentLength = 0;
 
-      // Baixa e instala silenciosamente
       await update.downloadAndInstall((event) => {
         switch (event.event) {
           case 'Started':
@@ -63,16 +66,24 @@ export const UpdateModal: React.FC<Props> = ({
 
       setDownloadComplete(true);
       setStatusText('Atualização pronta! Reiniciando em instantes...');
-      
-      // Reinicia o app atualizado automaticamente em 2 segundos
+
       setTimeout(async () => {
         await relaunch();
       }, 1500);
 
     } catch (err: any) {
       console.error('Erro ao atualizar automaticamente:', err);
-      alert(`Falha ao instalar automaticamente: ${err.message || err}. Você pode baixar pelo GitHub.`);
+      setUpdateError(true);
       setDownloading(false);
+    }
+  };
+
+  const handleOpenBrowser = async () => {
+    if (!release?.htmlUrl) return;
+    try {
+      await invoke('open_url', { url: release.htmlUrl });
+    } catch {
+      window.open(release.htmlUrl, '_blank');
     }
   };
 
@@ -122,7 +133,7 @@ export const UpdateModal: React.FC<Props> = ({
               </p>
             </div>
 
-            {/* Barra de Progresso durante Download */}
+            {/* Barra de Progresso */}
             {downloading && (
               <div className="space-y-2 py-2">
                 <div className="flex justify-between text-xs text-purple-300 font-mono">
@@ -138,15 +149,27 @@ export const UpdateModal: React.FC<Props> = ({
               </div>
             )}
 
-            {/* Botão de Ação */}
+            {/* Botões de Ação */}
             {!downloading ? (
-              <button
-                onClick={handleInstallUpdate}
-                className="w-full flex items-center justify-center gap-2 bg-linear-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white font-semibold py-2.5 rounded-xl transition text-sm shadow-lg shadow-purple-950/60 cursor-pointer"
-              >
-                <Download size={16} />
-                <span>Atualizar Automaticamente ({release.tagName})</span>
-              </button>
+              <div className="space-y-2">
+                <button
+                  onClick={handleInstallUpdate}
+                  className="w-full flex items-center justify-center gap-2 bg-linear-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white font-semibold py-2.5 rounded-xl transition text-sm shadow-lg shadow-purple-950/60 cursor-pointer"
+                >
+                  <Download size={16} />
+                  <span>Atualizar Automaticamente ({release.tagName})</span>
+                </button>
+
+                {updateError && (
+                  <button
+                    onClick={handleOpenBrowser}
+                    className="w-full flex items-center justify-center gap-1.5 text-xs text-purple-300 hover:text-purple-200 p-2 rounded-xl bg-surface border border-purple-900/40 transition cursor-pointer"
+                  >
+                    <span>Baixar Instalador pelo Navegador</span>
+                    <ExternalLink size={13} />
+                  </button>
+                )}
+              </div>
             ) : downloadComplete ? (
               <div className="p-2.5 bg-emerald-950/40 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 flex items-center justify-center gap-2">
                 <RotateCcw size={14} className="animate-spin" />
