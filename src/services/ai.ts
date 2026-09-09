@@ -5,7 +5,7 @@ import { streamClaude } from './claude';
 import { streamOpenAI } from './openai';
 import { streamDeepSeek } from './deepseek';
 import { streamOpenRouter } from './openrouter';
-import { streamOllama } from './ollama'; // <--- Importado
+import { streamOllama } from './ollama';
 
 export interface StreamOptions {
   model: string;
@@ -45,14 +45,16 @@ export async function* streamAIResponse({
     finalSystemInstruction += `\n\n[BASE DE CONHECIMENTO DO DIRETÓRIO LOCAL]:\n${directoryContext.trim()}`;
   }
 
-  // 0. OLLAMA LOCAL (100% Offline / Gratuito)
+  // 0. OLLAMA LOCAL (100% Offline / Irrestrito / GPU Máxima)
   if (provider === 'ollama') {
     yield* streamOllama({
       model,
       systemInstruction: finalSystemInstruction,
       history: relevantHistory,
       newMessage,
+      attachments,
       temperature: settings.temperature,
+      topP: settings.topP,
       signal,
     });
     return;

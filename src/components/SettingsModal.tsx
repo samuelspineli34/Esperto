@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { X, Eye, BookOpen, Key, Sparkles, Trash2, Globe, Sliders, Image, BrainCircuit } from 'lucide-react';
+import { X, Eye, BookOpen, Key, Sparkles, Trash2, Globe, Sliders, Image, BrainCircuit, Cpu, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
 import { ModelSelector } from './ModelSelector';
 import { Settings } from '../lib/db';
+import { checkOllamaOnline, getInstalledOllamaModels } from '../services/ollama';
+import { registerLocalOllamaModels } from '../lib/models';
 
 interface Props {
   isOpen: boolean;
@@ -12,10 +14,31 @@ interface Props {
 
 export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings: initialSettings, onSave }) => {
   const [form, setForm] = useState<Settings>(initialSettings);
+  const [ollamaOnline, setOllamaOnline] = useState(false);
+  const [ollamaCount, setOllamaCount] = useState(0);
+  const [checkingOllama, setCheckingOllama] = useState(false);
 
   useEffect(() => {
     setForm(initialSettings);
   }, [initialSettings, isOpen]);
+
+  useEffect(() => {
+    if (isOpen) {
+      checkOllama();
+    }
+  }, [isOpen]);
+
+  const checkOllama = async () => {
+    setCheckingOllama(true);
+    const online = await checkOllamaOnline();
+    setOllamaOnline(online);
+    if (online) {
+      const tags = await getInstalledOllamaModels();
+      setOllamaCount(tags.length);
+      registerLocalOllamaModels(tags);
+    }
+    setCheckingOllama(false);
+  };
 
   if (!isOpen) return null;
 
@@ -37,7 +60,7 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings: init
           </div>
           <div>
             <h2 className="text-base font-bold text-white tracking-wide">Configurações & Parâmetros dos Modelos</h2>
-            <p className="text-xs text-purple-300/60">Controles de raciocínio, temperatura, busca, chaves e memória.</p>
+            <p className="text-xs text-purple-300/60">Controles de raciocínio, temperatura, Ollama local e chaves de API.</p>
           </div>
         </div>
 
@@ -54,6 +77,40 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings: init
                 selectedModel={form.model || 'gemini-3.7-flash'}
                 onSelect={(id) => setForm((prev) => ({ ...prev, model: id }))}
               />
+            </div>
+
+            {/* Seção Ollama Local */}
+            <div className="p-3.5 bg-emerald-950/20 border border-emerald-900/40 rounded-2xl space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
+                  <Cpu size={14} className="text-emerald-400" />
+                  <span>Ollama Local (Sua GPU)</span>
+                </span>
+
+                <button
+                  type="button"
+                  onClick={checkOllama}
+                  disabled={checkingOllama}
+                  className="text-[11px] text-emerald-300 hover:text-emerald-200 flex items-center gap-1 bg-emerald-950/60 px-2 py-1 rounded-lg border border-emerald-800/40 transition cursor-pointer"
+                >
+                  <RefreshCw size={11} className={checkingOllama ? 'animate-spin' : ''} />
+                  <span>Sincronizar</span>
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between text-xs bg-background/60 p-2.5 rounded-xl border border-emerald-950/40">
+                <div className="flex items-center gap-2">
+                  {ollamaOnline ? (
+                    <CheckCircle2 size={14} className="text-emerald-400" />
+                  ) : (
+                    <AlertCircle size={14} className="text-amber-400" />
+                  )}
+                  <span className="font-mono text-[11px] text-gray-300">
+                    {ollamaOnline ? `Online (${ollamaCount} modelos locais)` : 'Offline (Inicie com ollama serve)'}
+                  </span>
+                </div>
+                <span className="text-[10px] text-gray-500 font-mono">127.0.0.1:11434</span>
+              </div>
             </div>
 
             {/* Parâmetros Avançados */}
@@ -137,7 +194,7 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings: init
             <div className="pt-2 border-t border-purple-950/40 space-y-2">
               <div className="flex items-center gap-1.5">
                 <Key size={13} className="text-purple-400" />
-                <label className="text-xs font-semibold text-purple-200">Chaves de API</label>
+                <label className="text-xs font-semibold text-purple-200">Chaves de API (Modelos em Nuvem)</label>
               </div>
 
               <div className="space-y-2">

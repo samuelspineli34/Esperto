@@ -1,3 +1,5 @@
+import { OllamaModelTag } from '../services/ollama';
+
 export type Provider = 'gemini' | 'openai' | 'anthropic' | 'deepseek' | 'openrouter' | 'ollama';
 export type PricingType = 'free_tier' | 'paid_only';
 
@@ -8,14 +10,15 @@ export interface AIModel {
   description: string;
   contextLimit: number;
   pricing: PricingType;
-  inputPrice?: number; // Preço por 1M tokens de entrada em USD
-  outputPrice?: number; // Preço por 1M tokens de saída em USD
+  inputPrice?: number;
+  outputPrice?: number;
   priceNote?: string;
   supportsImages: boolean;
   supportsSearch: boolean;
+  isLocal?: boolean;
 }
 
-const RAW_MODELS: AIModel[] = [
+const STATIC_MODELS: AIModel[] = [
   // === OPENROUTER - ROTA GRATUITA ===
   {
     id: 'openrouter/free',
@@ -330,31 +333,67 @@ const RAW_MODELS: AIModel[] = [
     supportsImages: false,
     supportsSearch: false,
   },
-
-  // === OLLAMA (100% Local / Offline) ===
-  {
-    id: 'ollama:deepseek-r1:8b',
-    name: 'Ollama: DeepSeek R1 8B (Local)',
-    provider: 'ollama',
-    description: 'Roda na sua máquina via Ollama sem internet e sem custo.',
-    contextLimit: 128000,
-    pricing: 'free_tier',
-    inputPrice: 0,
-    outputPrice: 0,
-    priceNote: '100% Local (Offline)',
-    supportsImages: false,
-    supportsSearch: false,
-  },
 ];
 
-export const AVAILABLE_MODELS: AIModel[] = [...RAW_MODELS].sort((a, b) =>
-  a.name.localeCompare(b.name)
-);
+// Lista mutável que recebe os modelos dinâmicos do Ollama local
+export let AVAILABLE_MODELS: AIModel[] = [...STATIC_MODELS];
+
+type ModelChangeListener = () => void;
+const listeners: ModelChangeListener[] = [];
+
+export function subscribeModelChanges(listener: ModelChangeListener) {
+  listeners.push(listener);
+  return () => {
+    const idx = listeners.indexOf(listener);
+    if (idx !== -1) listeners.splice(idx, 1);
+  };
+}
+
+function notifyListeners() {
+  listeners.forEach((l) => l());
+}
+
+/**
+ * Converte a lista do Ollama local em modelos compatíveis com o Esperto
+ */
+export function registerLocalOllamaModels(tags: OllamaModelTag[]) {
+  const localAIModels: AIModel[] = tags.map((t) => {
+    const param = t.details?.parameter_size ? ` (${t.details.parameter_size})` : '';
+    const quant = t.details?.quantization_level ? ` • ${t.details.quantization_level}` : '';
+    
+    // Deixa o nome mais legível na UI
+    let displayName = t.name;
+    if (displayName.includes('hf.co/')) {
+      const parts = displayName.split('/');
+      displayName = parts[parts.length - 1];
+    }
+
+    return {
+      id: `ollama:${t.name}`,
+      name: `Ollama: ${displayName}${param}`,
+      provider: 'ollama',
+      description: `Modelo Local na sua GPU • Sem censura / Sem internet${quant}`,
+      contextLimit: 128000,
+      pricing: 'free_tier',
+      inputPrice: 0,
+      outputPrice: 0,
+      priceNote: '100% Local (Sua GPU)',
+      supportsImages: true,
+      supportsSearch: false,
+      isLocal: true,
+    };
+  });
+
+  // Filtra modelos estáticos e adiciona os locais no topo
+  const otherModels = STATIC_MODELS.filter((m) => m.provider !== 'ollama');
+  AVAILABLE_MODELS = [...localAIModels, ...otherModels];
+  notifyListeners();
+}
 
 export function getProviderByModel(modelId: string): Provider {
+  if (modelId.startsWith('ollama:') || modelId.startsWith('ollama')) return 'ollama';
   const found = AVAILABLE_MODELS.find((m) => m.id === modelId);
   if (found) return found.provider;
-  if (modelId.startsWith('ollama:')) return 'ollama';
   if (modelId.includes('/')) return 'openrouter';
   if (modelId.startsWith('claude')) return 'anthropic';
   if (modelId.startsWith('deepseek')) return 'deepseek';
@@ -365,6 +404,26 @@ export function getProviderByModel(modelId: string): Provider {
 export function getModelInfo(modelId: string): AIModel {
   const found = AVAILABLE_MODELS.find((m) => m.id === modelId);
   if (found) return found;
+
+  // Fallback seguro se for um modelo local do Ollama que acabou de ser selecionado
+  if (modelId.startsWith('ollama:')) {
+    const rawName = modelId.replace('ollama:', '');
+    return {
+      id: modelId,
+      name: `Ollama: ${rawName}`,
+      provider: 'ollama',
+      description: 'Modelo local executado via Ollama',
+      contextLimit: 128000,
+      pricing: 'free_tier',
+      inputPrice: 0,
+      outputPrice: 0,
+      priceNote: '100% Local (Offline)',
+      supportsImages: true,
+      supportsSearch: false,
+      isLocal: true,
+    };
+  }
+
   return {
     id: modelId,
     name: modelId,

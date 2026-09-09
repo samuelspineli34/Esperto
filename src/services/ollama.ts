@@ -1,12 +1,56 @@
-import { Message } from '../lib/db';
+import { Message, Attachment } from '../lib/db';
+
+export interface OllamaModelTag {
+  name: string;
+  model: string;
+  size: number;
+  details?: {
+    format?: string;
+    family?: string;
+    parameter_size?: string;
+    quantization_level?: string;
+  };
+}
 
 interface StreamOptions {
   model: string;
   systemInstruction?: string;
   history: Message[];
   newMessage: string;
+  attachments?: Attachment[];
   temperature?: number;
+  topP?: number;
+  contextLength?: number;
   signal?: AbortSignal;
+}
+
+const OLLAMA_HOST = 'http://localhost:11434';
+
+export async function checkOllamaOnline(): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 1500);
+    const res = await fetch(`${OLLAMA_HOST}/api/version`, { signal: controller.signal });
+    clearTimeout(timeout);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function getInstalledOllamaModels(): Promise<OllamaModelTag[]> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    const res = await fetch(`${OLLAMA_HOST}/api/tags`, { signal: controller.signal });
+    clearTimeout(timeout);
+
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.models as OllamaModelTag[]) || [];
+  } catch {
+    return [];
+  }
 }
 
 export async function* streamOllama({
@@ -14,43 +58,79 @@ export async function* streamOllama({
   systemInstruction,
   history,
   newMessage,
+  attachments = [],
   temperature = 0.7,
+  topP = 0.9,
+  contextLength,
   signal,
 }: StreamOptions) {
-  const boundedHistory = history.slice(-10);
+  // Histórico deslizante amplo
+  const boundedHistory = history.slice(-25);
 
-  const messagesPayload = [
+  const messagesPayload: any[] = [
     {
       role: 'system',
-      content: systemInstruction || 'Você é o Esperto, um assistente desktop de inteligência artificial de alta performance.',
+      content: systemInstruction || 'Você é o Esperto, um assistente desktop de inteligência artificial de alta performance focado em código e raciocínio.',
     },
     ...boundedHistory.map((m) => ({
       role: m.role === 'model' ? 'assistant' : 'user',
       content: m.content,
     })),
-    { role: 'user', content: newMessage },
   ];
 
-  // Conecta ao servidor local do Ollama
-  const cleanModelName = model.replace('ollama:', '');
-  const res = await fetch('http://localhost:11434/api/chat', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: cleanModelName,
-      messages: messagesPayload,
-      options: {
-        temperature,
-      },
-      stream: true,
-    }),
-    signal,
+  const images: string[] = [];
+  attachments.forEach((att) => {
+    if (att.mimeType.startsWith('image/')) {
+      images.push(att.data);
+    }
   });
 
+  const currentUserMsg: any = {
+    role: 'user',
+    content: newMessage,
+  };
+
+  if (images.length > 0) {
+    currentUserMsg.images = images;
+  }
+
+  messagesPayload.push(currentUserMsg);
+
+  const cleanModelName = model.startsWith('ollama:') ? model.replace('ollama:', '') : model;
+
+  // Ajuste dinâmico inteligente de contexto para a RTX 2060 12GB:
+  // Se for 14B, usa 8.192 tokens. Se for 7B/8B (Dolphin), usa 16.384 tokens!
+  const targetContext = contextLength || (cleanModelName.toLowerCase().includes('14b') ? 8192 : 16384);
+
+  let res: Response;
+  try {
+    res = await fetch(`${OLLAMA_HOST}/api/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: cleanModelName,
+        messages: messagesPayload,
+        options: {
+          temperature,
+          top_p: topP,
+          num_ctx: targetContext,     // 🔥 Contexto expandido (não corta projeto)
+          num_predict: -1,            // 🔥 Geração infinita (não trunca código no meio)
+          num_thread: 6,              // 🔥 Otimizado para os 6 núcleos físicos do Ryzen 5600X
+        },
+        keep_alive: '24h',            // 🔥 Mantém o modelo preso na VRAM da GPU para respostas instantâneas
+        stream: true,
+      }),
+      signal,
+    });
+  } catch {
+    throw new Error(`Não foi possível conectar ao Ollama em ${OLLAMA_HOST}. Verifique se ele está rodando.`);
+  }
+
   if (!res.ok) {
-    throw new Error(`Erro ao conectar ao Ollama local (porta 11434). Verifique se o Ollama está em execução.`);
+    const errText = await res.text();
+    throw new Error(`Erro do Ollama (${res.status}): ${errText}`);
   }
 
   const reader = res.body?.getReader();

@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db, Chat, Message, Settings, Attachment, WorkspacePreset } from './lib/db';
 import { streamAIResponse } from './services/ai';
-import { getModelInfo } from './lib/models';
+import { getModelInfo, registerLocalOllamaModels } from './lib/models';
+import { getInstalledOllamaModels } from './services/ollama';
 import { Sidebar } from './components/Sidebar';
 import { ChatMessage } from './components/ChatMessage';
 import { SettingsModal } from './components/SettingsModal';
@@ -9,7 +10,7 @@ import { UpdateModal } from './components/UpdateModal';
 import { HelpModal } from './components/HelpModal';
 import { ArtifactPreview } from './components/ArtifactPreview';
 import { checkForUpdates, ReleaseInfo } from './services/updater';
-import { Send, Sliders, Eye, Brain, Copy, Paperclip, X, FileText, Image as ImageIcon, Activity, Square, Timer, Folder, FolderCheck, FolderSync, Plus, Trash2, Download as ExportIcon, Bookmark, BookmarkPlus, DollarSign, Gift } from 'lucide-react';
+import { Send, Sliders, Eye, Brain, Copy, Paperclip, X, FileText, Image as ImageIcon, Activity, Square, Timer, Folder, FolderCheck, FolderSync, Plus, Trash2, Download as ExportIcon, Bookmark, BookmarkPlus, DollarSign, Gift, Cpu } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 
 const defaultSettings: Settings = {
@@ -96,7 +97,7 @@ export default function App() {
 
   // Cálculo de Custo Médio Estimado em Dólar para Modelos Pagos
   const estimatedCostUSD = useMemo(() => {
-    if (modelInfo.pricing === 'free_tier') return 0;
+    if (modelInfo.pricing === 'free_tier' || modelInfo.isLocal) return 0;
 
     let userChars = (settings.globalMemory || '').length + (systemInstruction || '').length;
     let modelChars = 0;
@@ -120,6 +121,22 @@ export default function App() {
 
     return (inputTokens / 1000000) * inPrice + (outputTokens / 1000000) * outPrice;
   }, [messages, inputMessage, systemInstruction, settings.globalMemory, modelInfo]);
+
+  // Auto-detecção de modelos locais do Ollama ao iniciar a IDE
+  useEffect(() => {
+    const initLocalModels = async () => {
+      try {
+        const tags = await getInstalledOllamaModels();
+        if (tags && tags.length > 0) {
+          registerLocalOllamaModels(tags);
+          console.log(`[Esperto] ${tags.length} modelos locais do Ollama detectados.`);
+        }
+      } catch (err) {
+        console.warn('[Esperto] Ollama offline no boot.');
+      }
+    };
+    initLocalModels();
+  }, []);
 
   useEffect(() => {
     const loadInitialData = async () => {
@@ -650,13 +667,16 @@ export default function App() {
               ESPERTO
             </span>
 
-            {/* Badge do Modelo com Selo Grátis/Pago */}
+            {/* Badge do Modelo com Selo Grátis/Pago/Local */}
             <button
               onClick={() => setIsSettingsOpen(true)}
               className="text-[10px] font-semibold bg-purple-950/80 hover:bg-purple-900/80 text-purple-300 px-2.5 py-0.5 rounded-full border border-purple-800/40 transition cursor-pointer flex items-center gap-1.5"
             >
+              {modelInfo.isLocal && <Cpu size={11} className="text-emerald-400 animate-pulse" />}
               <span>{settings.model || 'gemini-3.7-flash'}</span>
-              {modelInfo.pricing === 'free_tier' ? (
+              {modelInfo.isLocal ? (
+                <span className="bg-emerald-950 text-emerald-300 text-[9px] px-1.5 py-0.2 rounded font-bold border border-emerald-500/50">LOCAL</span>
+              ) : modelInfo.pricing === 'free_tier' ? (
                 <span className="bg-emerald-950 text-emerald-300 text-[9px] px-1 py-0.2 rounded font-bold border border-emerald-800/50">GRÁTIS</span>
               ) : (
                 <span className="bg-amber-950 text-amber-300 text-[9px] px-1 py-0.2 rounded font-bold border border-amber-800/50">PAGO</span>
@@ -675,8 +695,16 @@ export default function App() {
               <span className="font-bold ml-0.5">({tokenUsagePercent}%)</span>
             </div>
 
-            {/* Indicador de Custo Médio Estimado em Dólar */}
-            {modelInfo.pricing === 'paid_only' ? (
+            {/* Indicador de Custo Médio Estimado em Dólar / Local */}
+            {modelInfo.isLocal ? (
+              <div
+                title="Executando 100% offline na sua placa de vídeo via Ollama sem consumo de cota ou faturamento."
+                className="hidden lg:flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-surface border border-emerald-900/40 text-[10px] font-mono text-emerald-300 shadow-sm"
+              >
+                <Cpu size={11} className="text-emerald-400" />
+                <span>Custo: $0.00 (GPU Local)</span>
+              </div>
+            ) : modelInfo.pricing === 'paid_only' ? (
               <div
                 title={`Custo estimado da conversa atual (${modelInfo.name}): ~$${modelInfo.inputPrice}/1M entrada, ~$${modelInfo.outputPrice}/1M saída`}
                 className="hidden lg:flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-surface border border-amber-900/40 text-[10px] font-mono text-amber-300 shadow-sm"
