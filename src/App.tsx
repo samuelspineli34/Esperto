@@ -10,8 +10,23 @@ import { UpdateModal } from './components/UpdateModal';
 import { HelpModal } from './components/HelpModal';
 import { ArtifactPreview } from './components/ArtifactPreview';
 import { checkForUpdates, ReleaseInfo } from './services/updater';
-import { Send, Sliders, Eye, Brain, Copy, Paperclip, X, FileText, Image as ImageIcon, Activity, Square, Timer, Folder, FolderCheck, FolderSync, Plus, Trash2, Download as ExportIcon, Bookmark, BookmarkPlus, DollarSign, Gift, Cpu } from 'lucide-react';
+import { Send, Sliders, Eye, Brain, Copy, Paperclip, X, FileText, Image as ImageIcon, Activity, Square, Timer, Folder, FolderCheck, FolderSync, Plus, Trash2, Download as ExportIcon, Bookmark, BookmarkPlus, DollarSign, Gift, Cpu, FolderSearch } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
+
+const AGENT_SYSTEM_PROMPT = `Você é o ESPERTO, um Engenheiro de Software Autônomo e Agente de Código de Alta Performance.
+Você tem ACESSO DIRETO ao sistema de arquivos do usuário através da IDE.
+
+DIRETRIZES DE AGENTE:
+1. Quando for solicitado a criar, modificar ou refatorar arquivos, NUNCA peça para o usuário copiar e colar.
+2. Em vez disso, use a tag de escrita para gravar o arquivo direto no disco:
+<esperto_write path="caminho/do/arquivo.ext">
+// conteúdo completo do arquivo aqui
+</esperto_write>
+
+3. Para executar comandos no terminal do projeto (instalar dependências, rodar testes, compilar):
+<esperto_cmd>comando aqui</esperto_cmd>
+
+4. Seja direto, forneça código completo e funcional sem comentários preguiçosos (como "// resto do código aqui").`;
 
 const defaultSettings: Settings = {
   id: 'default',
@@ -48,7 +63,6 @@ export default function App() {
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [latestRelease, setLatestRelease] = useState<ReleaseInfo | null>(null);
 
-  // Múltiplos Diretórios e Predefinições
   const [presets, setPresets] = useState<WorkspacePreset[]>([]);
   const [directoryPaths, setDirectoryPaths] = useState<string[]>([]);
   const [newDirPath, setNewDirPath] = useState('');
@@ -67,7 +81,6 @@ export default function App() {
 
   const modelInfo = useMemo(() => getModelInfo(settings.model || 'gemini-3.7-flash'), [settings.model]);
 
-  // Cronômetro em tempo real
   useEffect(() => {
     let interval: any;
     if (isLoading) {
@@ -80,7 +93,6 @@ export default function App() {
     return () => clearInterval(interval);
   }, [isLoading]);
 
-  // Contagem de tokens em tempo real
   const totalEstimatedTokens = useMemo(() => {
     let charCount = (settings.globalMemory || '').length + (systemInstruction || '').length;
     messages.forEach((m) => {
@@ -95,7 +107,6 @@ export default function App() {
     return Math.min(100, Math.round((totalEstimatedTokens / modelInfo.contextLimit) * 1000) / 10);
   }, [totalEstimatedTokens, modelInfo.contextLimit]);
 
-  // Cálculo de Custo Médio Estimado em Dólar para Modelos Pagos
   const estimatedCostUSD = useMemo(() => {
     if (modelInfo.pricing === 'free_tier' || modelInfo.isLocal) return 0;
 
@@ -122,16 +133,14 @@ export default function App() {
     return (inputTokens / 1000000) * inPrice + (outputTokens / 1000000) * outPrice;
   }, [messages, inputMessage, systemInstruction, settings.globalMemory, modelInfo]);
 
-  // Auto-detecção de modelos locais do Ollama ao iniciar a IDE
   useEffect(() => {
     const initLocalModels = async () => {
       try {
         const tags = await getInstalledOllamaModels();
         if (tags && tags.length > 0) {
           registerLocalOllamaModels(tags);
-          console.log(`[Esperto] ${tags.length} modelos locais do Ollama detectados.`);
         }
-      } catch (err) {
+      } catch {
         console.warn('[Esperto] Ollama offline no boot.');
       }
     };
@@ -185,10 +194,11 @@ export default function App() {
     loadChatData();
   }, [activeChatId]);
 
+  // Rolagem ultra-fluida sem engasgar o React durante streaming rápido
   useEffect(() => {
     chatContainerRef.current?.scrollTo({
       top: chatContainerRef.current.scrollHeight,
-      behavior: 'smooth',
+      behavior: isLoading ? 'auto' : 'smooth',
     });
   }, [messages, isLoading]);
 
@@ -212,6 +222,20 @@ export default function App() {
       console.warn('Erro ao ler pastas:', err);
     } finally {
       setLoadingDirectories(false);
+    }
+  };
+
+  // Abre a janela nativa do Windows para escolher pastas
+  const handleBrowseFolder = async () => {
+    try {
+      const selected = await invoke<string | null>('select_folder');
+      if (selected) {
+        const updated = Array.from(new Set([...directoryPaths, selected.trim()]));
+        setDirectoryPaths(updated);
+        syncDirectories(updated);
+      }
+    } catch (err) {
+      console.warn('Erro ao abrir seletor:', err);
     }
   };
 
@@ -288,7 +312,7 @@ export default function App() {
 
     scoredFiles.sort((a, b) => b.score - a.score);
 
-    const MAX_CHARS_BUDGET = 180000;
+    const MAX_CHARS_BUDGET = 40000;
     let accumulatedChars = manifest.length;
     let includedCount = 0;
     let filesContent = '';
@@ -524,12 +548,13 @@ export default function App() {
     ]);
 
     let responseText = '';
+    const combinedSystemPrompt = `${AGENT_SYSTEM_PROMPT}\n\n${systemInstruction || ''}`;
 
     try {
       const generator = streamAIResponse({
         model: settings.model || 'gemini-3.7-flash',
         settings,
-        systemInstruction,
+        systemInstruction: combinedSystemPrompt,
         globalMemory: settings.globalMemory,
         directoryContext: smartContext,
         history: currentMessages.slice(0, -1),
@@ -667,7 +692,6 @@ export default function App() {
               ESPERTO
             </span>
 
-            {/* Badge do Modelo com Selo Grátis/Pago/Local */}
             <button
               onClick={() => setIsSettingsOpen(true)}
               className="text-[10px] font-semibold bg-purple-950/80 hover:bg-purple-900/80 text-purple-300 px-2.5 py-0.5 rounded-full border border-purple-800/40 transition cursor-pointer flex items-center gap-1.5"
@@ -683,7 +707,6 @@ export default function App() {
               )}
             </button>
 
-            {/* Contador de Contexto */}
             <div
               title={`Contexto: ${totalEstimatedTokens.toLocaleString()} de ${(modelInfo.contextLimit / 1000).toFixed(0)}k tokens`}
               className="hidden md:flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-surface border border-purple-900/30 text-[10px] font-mono text-purple-300"
@@ -695,7 +718,6 @@ export default function App() {
               <span className="font-bold ml-0.5">({tokenUsagePercent}%)</span>
             </div>
 
-            {/* Indicador de Custo Médio Estimado em Dólar / Local */}
             {modelInfo.isLocal ? (
               <div
                 title="Executando 100% offline na sua placa de vídeo via Ollama sem consumo de cota ou faturamento."
@@ -770,7 +792,6 @@ export default function App() {
               <span>{systemInstruction ? 'Instruções Ativas' : 'Instruções'}</span>
             </button>
 
-            {/* Botão de Pastas Base */}
             <button
               onClick={() => setShowDirectoryDrawer(!showDirectoryDrawer)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition border cursor-pointer ${
@@ -797,10 +818,8 @@ export default function App() {
           </div>
         </header>
 
-        {/* Gaveta de Gerenciamento de Pastas e Predefinições */}
         {showDirectoryDrawer && (
           <div className="p-4 bg-surface border-b border-purple-950/40 transition space-y-4 shadow-xl">
-            {/* Seção de Predefinições Salvas (Workspaces) */}
             <div>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-bold text-purple-200 flex items-center gap-1.5">
@@ -818,7 +837,6 @@ export default function App() {
                 </button>
               </div>
 
-              {/* Formulário para salvar novo projeto */}
               {isCreatingPreset && (
                 <div className="flex gap-2 p-2.5 mb-2.5 bg-background border border-purple-500/40 rounded-xl animate-in fade-in duration-150">
                   <input
@@ -838,7 +856,6 @@ export default function App() {
                 </div>
               )}
 
-              {/* Chips de Projetos Salvos */}
               {presets.length === 0 ? (
                 <p className="text-[11px] text-gray-500">Nenhum projeto salvo ainda. Adicione pastas abaixo e clique em salvar para criar seu primeiro projeto.</p>
               ) : (
@@ -871,7 +888,6 @@ export default function App() {
               )}
             </div>
 
-            {/* Lista de Pastas Ativas deste Chat */}
             <div className="pt-2 border-t border-purple-950/30 space-y-2">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-semibold text-purple-200">
@@ -900,12 +916,21 @@ export default function App() {
               )}
 
               <div className="flex gap-2 pt-1">
+                <button
+                  onClick={handleBrowseFolder}
+                  className="bg-purple-950/80 hover:bg-purple-900 border border-purple-500/40 text-purple-300 hover:text-white px-3 py-1.5 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  title="Abrir o explorador do Windows para escolher a pasta"
+                >
+                  <FolderSearch size={14} className="text-purple-400" />
+                  <span>Procurar Pasta</span>
+                </button>
+
                 <input
                   type="text"
                   value={newDirPath}
                   onChange={(e) => setNewDirPath(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleAddDirectory()}
-                  placeholder="Cole o caminho de uma pasta (ex: C:\MeuApp ou /home/samuel/projeto)"
+                  placeholder="Ou cole o caminho de uma pasta..."
                   className="flex-1 bg-background border border-purple-900/40 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-purple-500 font-mono"
                 />
                 <button
@@ -950,44 +975,44 @@ export default function App() {
               <div className="w-16 h-16 rounded-2xl bg-purple-950/30 border border-purple-500/20 flex items-center justify-center mb-4 shadow-xl shadow-purple-950/30">
                 <Eye size={36} className="text-purple-400 animate-pulse" />
               </div>
-              <h2 className="text-base font-bold text-white mb-1">Como o Esperto pode te ajudar hoje?</h2>
-              <p className="text-xs text-gray-500 mb-6 text-center">Selecione uma ação rápida ou envie uma mensagem com imagens, pastas ou arquivos.</p>
+              <h2 className="text-base font-bold text-white mb-1">Esperto • Agente Autônomo Local</h2>
+              <p className="text-xs text-gray-500 mb-6 text-center">Peça para o Esperto criar, editar e refatorar os arquivos do seu projeto diretamente no disco.</p>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full">
                 <button
                   type="button"
-                  onClick={() => handleSendMessage('Analise a arquitetura dos arquivos de código carregados e sugira melhorias.')}
+                  onClick={() => handleSendMessage('Crie um script utilitário em TypeScript na pasta src/lib chamado formatters.ts com funções úteis.')}
                   className="p-3 bg-surface/50 hover:bg-surface border border-purple-900/30 hover:border-purple-500/50 rounded-xl text-left transition cursor-pointer group"
                 >
-                  <span className="text-xs font-semibold text-purple-200 group-hover:text-white block">🔍 Analisar Arquitetura</span>
-                  <span className="text-[11px] text-gray-500">Avalia a estrutura dos arquivos das pastas vinculadas.</span>
+                  <span className="text-xs font-semibold text-purple-200 group-hover:text-white block">⚡ Criar Arquivo no Projeto</span>
+                  <span className="text-[11px] text-gray-500">O Agente gera e você salva no HD em 1 clique.</span>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => handleSendMessage('Crie um componente de Dashboard moderno em HTML e Tailwind CSS com gráficos.')}
+                  onClick={() => handleSendMessage('Analise os arquivos do projeto e refatore a estrutura para melhorar a performance.')}
                   className="p-3 bg-surface/50 hover:bg-surface border border-purple-900/30 hover:border-purple-500/50 rounded-xl text-left transition cursor-pointer group"
                 >
-                  <span className="text-xs font-semibold text-purple-200 group-hover:text-white block">🎨 Criar Componente com Preview</span>
-                  <span className="text-[11px] text-gray-500">Gera código com visualização interativa instantânea.</span>
+                  <span className="text-xs font-semibold text-purple-200 group-hover:text-white block">🛠 Refatorar Código Existente</span>
+                  <span className="text-[11px] text-gray-500">Gera as modificações prontas para aplicar.</span>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => handleSendMessage('Como posso otimizar a performance de memória e execução da minha aplicação?')}
+                  onClick={() => handleSendMessage('Crie um teste unitário completo para a lógica principal do app.')}
                   className="p-3 bg-surface/50 hover:bg-surface border border-purple-900/30 hover:border-purple-500/50 rounded-xl text-left transition cursor-pointer group"
                 >
-                  <span className="text-xs font-semibold text-purple-200 group-hover:text-white block">⚡ Otimizar Performance</span>
-                  <span className="text-[11px] text-gray-500">Dicas avançadas de consumo de RAM e CPU.</span>
+                  <span className="text-xs font-semibold text-purple-200 group-hover:text-white block">🧪 Gerar Testes Automatizados</span>
+                  <span className="text-[11px] text-gray-500">Cria os arquivos de teste direto na estrutura.</span>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => handleSendMessage('Explique o funcionamento detalhado dos algoritmos deste projeto.')}
+                  onClick={() => handleSendMessage('Como posso compilar e verificar erros deste projeto via terminal?')}
                   className="p-3 bg-surface/50 hover:bg-surface border border-purple-900/30 hover:border-purple-500/50 rounded-xl text-left transition cursor-pointer group"
                 >
-                  <span className="text-xs font-semibold text-purple-200 group-hover:text-white block">🧠 Explicar Código Complexo</span>
-                  <span className="text-[11px] text-gray-500">Detalhamento passo a passo de fluxos lógicos.</span>
+                  <span className="text-xs font-semibold text-purple-200 group-hover:text-white block">💻 Executar Comandos no Terminal</span>
+                  <span className="text-[11px] text-gray-500">Roda builds e comandos direto pela IDE.</span>
                 </button>
               </div>
             </div>
@@ -998,9 +1023,11 @@ export default function App() {
                 role={msg.role}
                 content={msg.content}
                 attachments={msg.attachments}
+                baseDirectories={directoryPaths}
                 onEdit={msg.role === 'user' ? (newText) => handleEditMessage(index, newText) : undefined}
                 onRetry={msg.role === 'model' && index === messages.length - 1 ? handleRetryLastMessage : undefined}
                 onOpenArtifact={(code, lang) => setActiveArtifact({ code, language: lang })}
+                onFileWritten={() => syncDirectories(directoryPaths)}
               />
             ))
           )}
@@ -1011,14 +1038,13 @@ export default function App() {
                 <Eye size={18} className="text-purple-400" />
               </div>
               <div className="flex items-center gap-2 text-xs font-mono">
-                <span className="animate-pulse">Consultando Esperto...</span>
+                <span className="animate-pulse">Esperto analisando e gerando ações...</span>
                 <span className="text-purple-400 font-bold">({elapsedTime.toFixed(1)}s)</span>
               </div>
             </div>
           )}
         </div>
 
-        {/* Caixa de Entrada */}
         <div className="p-4 bg-surface/40 border-t border-purple-950/30">
           <form onSubmit={(e) => { e.preventDefault(); handleSendMessage(); }} className="max-w-4xl mx-auto flex flex-col gap-2">
 
@@ -1060,7 +1086,7 @@ export default function App() {
                 onChange={(e) => setInputMessage(e.target.value)}
                 onKeyDown={handleKeyDown}
                 onPaste={handlePaste}
-                placeholder="Pergunte ao Esperto... (Enter para enviar, Ctrl+Enter para nova linha)"
+                placeholder="Peça para o Agente criar ou alterar arquivos no projeto... (Enter para enviar)"
                 className="w-full bg-transparent px-1 pt-1 text-sm text-white placeholder-gray-500 focus:outline-none resize-y min-h-17.5 max-h-96 leading-relaxed font-sans"
               />
 
@@ -1069,7 +1095,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    title="Anexar imagens ou documentos (ou cole com Ctrl+V)"
+                    title="Anexar imagens ou documentos"
                     className="p-1.5 hover:bg-surfaceHover text-purple-400 hover:text-purple-300 rounded-lg transition flex items-center justify-center cursor-pointer"
                   >
                     <Paperclip size={18} />

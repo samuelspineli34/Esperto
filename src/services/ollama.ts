@@ -59,12 +59,11 @@ export async function* streamOllama({
   history,
   newMessage,
   attachments = [],
-  temperature = 0.7,
+  temperature = 0.6,
   topP = 0.9,
   contextLength,
   signal,
 }: StreamOptions) {
-  // Histórico deslizante amplo
   const boundedHistory = history.slice(-25);
 
   const messagesPayload: any[] = [
@@ -97,9 +96,6 @@ export async function* streamOllama({
   messagesPayload.push(currentUserMsg);
 
   const cleanModelName = model.startsWith('ollama:') ? model.replace('ollama:', '') : model;
-
-  // Ajuste dinâmico inteligente de contexto para a RTX 2060 12GB:
-  // Se for 14B, usa 8.192 tokens. Se for 7B/8B (Dolphin), usa 16.384 tokens!
   const targetContext = contextLength || (cleanModelName.toLowerCase().includes('14b') ? 8192 : 16384);
 
   let res: Response;
@@ -115,11 +111,13 @@ export async function* streamOllama({
         options: {
           temperature,
           top_p: topP,
-          num_ctx: targetContext,     // 🔥 Contexto expandido (não corta projeto)
-          num_predict: -1,            // 🔥 Geração infinita (não trunca código no meio)
-          num_thread: 6,              // 🔥 Otimizado para os 6 núcleos físicos do Ryzen 5600X
+          top_k: 40,                   // Melhora foco e sintaxe de código
+          repeat_penalty: 1.1,         // Impede loops repetitivos de código
+          num_ctx: targetContext,      // 16k ou 8k dependendo do modelo
+          num_predict: -1,             // Geração infinita sem corte
+          num_thread: 6,               // 6 núcleos físicos do Ryzen 5600X
         },
-        keep_alive: '24h',            // 🔥 Mantém o modelo preso na VRAM da GPU para respostas instantâneas
+        keep_alive: '24h',
         stream: true,
       }),
       signal,

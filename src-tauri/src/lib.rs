@@ -51,7 +51,7 @@ fn collect_files(base_path: &Path, current_path: &Path, results: &mut Vec<FileCo
             } else if path.is_file() {
                 if let Ok(metadata) = fs::metadata(&path) {
                     if metadata.len() > 350_000 {
-                        continue; // Ignora arquivos individuais maiores que 350KB
+                        continue;
                     }
                 }
                 if let Ok(content) = fs::read_to_string(&path) {
@@ -85,6 +85,75 @@ fn read_multiple_directories(dir_paths: Vec<String>) -> Result<Vec<FileContext>,
     Ok(all_files)
 }
 
+// Abre a janela nativa do Windows para selecionar pastas sem digitar caminhos
+#[tauri::command]
+fn select_folder() -> Result<Option<String>, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let script = r#"
+        Add-Type -AssemblyName System.Windows.Forms
+        $f = New-Object System.Windows.Forms.FolderBrowserDialog
+        $f.Description = "Selecione a pasta do projeto para o Esperto"
+        $f.ShowNewFolderButton = $true
+        if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+            Write-Output $f.SelectedPath
+        }
+        "#;
+        let output = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", script])
+            .output()
+            .map_err(|e| e.to_string())?;
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if path.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(path))
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(None)
+    }
+}
+
+#[tauri::command]
+fn write_file(path: String, content: String) -> Result<String, String> {
+    let p = Path::new(&path);
+    if let Some(parent) = p.parent() {
+        if !parent.exists() {
+            fs::create_dir_all(parent).map_err(|e| format!("Erro ao criar diretórios: {}", e))?;
+        }
+    }
+    fs::write(p, content).map_err(|e| format!("Erro ao gravar arquivo {}: {}", path, e))?;
+    Ok(format!("Arquivo salvo com sucesso em: {}", path))
+}
+
+#[tauri::command]
+fn execute_terminal_command(command: String, cwd: Option<String>) -> Result<String, String> {
+    let mut cmd = if cfg!(target_os = "windows") {
+        let mut c = std::process::Command::new("cmd");
+        c.args(["/C", &command]);
+        c
+    } else {
+        let mut c = std::process::Command::new("sh");
+        c.args(["-c", &command]);
+        c
+    };
+
+    if let Some(dir) = cwd {
+        if Path::new(&dir).exists() {
+            cmd.current_dir(dir);
+        }
+    }
+
+    let output = cmd.output().map_err(|e| format!("Falha ao executar comando: {}", e))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    let combined = format!("{}\n{}", stdout, stderr).trim().to_string();
+    Ok(combined)
+}
+
 #[tauri::command]
 fn open_url(url: String) {
     #[cfg(target_os = "windows")]
@@ -106,7 +175,13 @@ pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_updater::Builder::new().build())
     .plugin(tauri_plugin_process::init())
-    .invoke_handler(tauri::generate_handler![open_url, read_multiple_directories])
+    .invoke_handler(tauri::generate_handler![
+        open_url, 
+        read_multiple_directories,
+        select_folder,
+        write_file,
+        execute_terminal_command
+    ])
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
