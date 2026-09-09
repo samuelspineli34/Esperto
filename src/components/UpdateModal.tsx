@@ -4,6 +4,7 @@ import { check } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { invoke } from '@tauri-apps/api/core';
 import { ReleaseInfo, CURRENT_VERSION } from '../services/updater';
+import { AppErrorInfo } from './ErrorModal';
 
 interface Props {
   isOpen: boolean;
@@ -11,6 +12,7 @@ interface Props {
   checking: boolean;
   release: ReleaseInfo | null;
   onCheckAgain: () => void;
+  onErrorTrigger: (error: AppErrorInfo) => void;
 }
 
 export const UpdateModal: React.FC<Props> = ({
@@ -19,6 +21,7 @@ export const UpdateModal: React.FC<Props> = ({
   checking,
   release,
   onCheckAgain,
+  onErrorTrigger,
 }) => {
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -32,13 +35,20 @@ export const UpdateModal: React.FC<Props> = ({
     try {
       setDownloading(true);
       setUpdateError(false);
-      setStatusText('Buscando pacote de atualização...');
+      setStatusText('Buscando pacote oficial de atualização...');
 
       const update = await check();
       if (!update) {
-        setStatusText('Instalação manual necessária para esta versão.');
+        // Se o plugin do Tauri não encontrar o manifesto assinado, dá fallback direto pro instalador do GitHub
+        setStatusText('Atualizador automático não assinado. Use o download direto.');
         setUpdateError(true);
         setDownloading(false);
+        onErrorTrigger({
+          title: 'Atualização Automática Não Configurada',
+          context: 'Tauri Updater Plugin',
+          message: 'O instalador desta versão não possui a assinatura digital (.sig) no GitHub Releases. Clique no botão abaixo para baixar o instalador diretamente.',
+          technicalDetails: 'Tauri check() retornou null. O repositório precisa do asset latest.json para atualização silenciosa in-app.',
+        });
         return;
       }
 
@@ -75,6 +85,12 @@ export const UpdateModal: React.FC<Props> = ({
       console.error('Erro ao atualizar automaticamente:', err);
       setUpdateError(true);
       setDownloading(false);
+      onErrorTrigger({
+        title: 'Falha no Download da Atualização',
+        context: 'Processo de Download e Instalação do Tauri',
+        message: 'Ocorreu um erro ao baixar ou aplicar os arquivos da nova versão.',
+        technicalDetails: err?.stack || err?.toString() || JSON.stringify(err),
+      });
     }
   };
 
@@ -133,7 +149,6 @@ export const UpdateModal: React.FC<Props> = ({
               </p>
             </div>
 
-            {/* Barra de Progresso */}
             {downloading && (
               <div className="space-y-2 py-2">
                 <div className="flex justify-between text-xs text-purple-300 font-mono">
@@ -149,7 +164,6 @@ export const UpdateModal: React.FC<Props> = ({
               </div>
             )}
 
-            {/* Botões de Ação */}
             {!downloading ? (
               <div className="space-y-2">
                 <button
@@ -160,15 +174,13 @@ export const UpdateModal: React.FC<Props> = ({
                   <span>Atualizar Automaticamente ({release.tagName})</span>
                 </button>
 
-                {updateError && (
-                  <button
-                    onClick={handleOpenBrowser}
-                    className="w-full flex items-center justify-center gap-1.5 text-xs text-purple-300 hover:text-purple-200 p-2 rounded-xl bg-surface border border-purple-900/40 transition cursor-pointer"
-                  >
-                    <span>Baixar Instalador pelo Navegador</span>
-                    <ExternalLink size={13} />
-                  </button>
-                )}
+                <button
+                  onClick={handleOpenBrowser}
+                  className="w-full flex items-center justify-center gap-1.5 text-xs text-purple-300 hover:text-purple-200 p-2 rounded-xl bg-surface border border-purple-900/40 transition cursor-pointer"
+                >
+                  <span>Baixar Instalador pelo Navegador (.exe)</span>
+                  <ExternalLink size={13} />
+                </button>
               </div>
             ) : downloadComplete ? (
               <div className="p-2.5 bg-emerald-950/40 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 flex items-center justify-center gap-2">

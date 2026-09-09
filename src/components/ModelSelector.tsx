@@ -23,7 +23,6 @@ export const ModelSelector: React.FC<Props> = ({ selectedModel, onSelect }) => {
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   useEffect(() => {
-    // Inscreve para atualizar a lista automaticamente quando os modelos do Ollama forem detectados
     const unsubscribe = subscribeModelChanges(() => {
       setModelsList([...AVAILABLE_MODELS]);
     });
@@ -33,8 +32,10 @@ export const ModelSelector: React.FC<Props> = ({ selectedModel, onSelect }) => {
   const handleRefreshOllama = async () => {
     setIsRefreshing(true);
     try {
-      const tags = await getInstalledOllamaModels();
-      registerLocalOllamaModels(tags);
+      const result = await getInstalledOllamaModels();
+      if (result.models && result.models.length > 0) {
+        registerLocalOllamaModels(result.models);
+      }
     } finally {
       setIsRefreshing(false);
     }

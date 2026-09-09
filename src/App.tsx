@@ -8,6 +8,7 @@ import { ChatMessage } from './components/ChatMessage';
 import { SettingsModal } from './components/SettingsModal';
 import { UpdateModal } from './components/UpdateModal';
 import { HelpModal } from './components/HelpModal';
+import { ErrorModal, AppErrorInfo } from './components/ErrorModal';
 import { ArtifactPreview } from './components/ArtifactPreview';
 import { checkForUpdates, ReleaseInfo } from './services/updater';
 import { Send, Sliders, Eye, Brain, Copy, Paperclip, X, FileText, Image as ImageIcon, Activity, Square, Timer, Folder, FolderCheck, FolderSync, Plus, Trash2, Download as ExportIcon, Bookmark, BookmarkPlus, DollarSign, Gift, Cpu, FolderSearch } from 'lucide-react';
@@ -58,6 +59,9 @@ export default function App() {
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [settings, setSettings] = useState<Settings>(defaultSettings);
   const [elapsedTime, setElapsedTime] = useState(0);
+
+  // Modal de Erro Global com Copiar Log
+  const [activeError, setActiveError] = useState<AppErrorInfo | null>(null);
 
   const [isUpdateOpen, setIsUpdateOpen] = useState(false);
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
@@ -135,13 +139,9 @@ export default function App() {
 
   useEffect(() => {
     const initLocalModels = async () => {
-      try {
-        const tags = await getInstalledOllamaModels();
-        if (tags && tags.length > 0) {
-          registerLocalOllamaModels(tags);
-        }
-      } catch {
-        console.warn('[Esperto] Ollama offline no boot.');
+      const res = await getInstalledOllamaModels();
+      if (res.models && res.models.length > 0) {
+        registerLocalOllamaModels(res.models);
       }
     };
     initLocalModels();
@@ -194,7 +194,6 @@ export default function App() {
     loadChatData();
   }, [activeChatId]);
 
-  // Rolagem ultra-fluida sem engasgar o React durante streaming rápido
   useEffect(() => {
     chatContainerRef.current?.scrollTo({
       top: chatContainerRef.current.scrollHeight,
@@ -225,7 +224,6 @@ export default function App() {
     }
   };
 
-  // Abre a janela nativa do Windows para escolher pastas
   const handleBrowseFolder = async () => {
     try {
       const selected = await invoke<string | null>('select_folder');
@@ -234,8 +232,13 @@ export default function App() {
         setDirectoryPaths(updated);
         syncDirectories(updated);
       }
-    } catch (err) {
-      console.warn('Erro ao abrir seletor:', err);
+    } catch (err: any) {
+      setActiveError({
+        title: 'Falha ao Selecionar Pasta',
+        context: 'Seletor Nativo do Windows',
+        message: 'Não foi possível abrir o seletor de diretórios.',
+        technicalDetails: err?.toString() || 'Erro desconhecido ao invocar select_folder',
+      });
     }
   };
 
@@ -601,6 +604,13 @@ export default function App() {
           role: 'model',
           content: errorMessage,
           timestamp: Date.now(),
+        });
+
+        setActiveError({
+          title: 'Erro na Geração da Resposta',
+          context: `Modelo: ${settings.model || 'desconhecido'}`,
+          message: err.message || 'Não foi possível completar o streaming da resposta.',
+          technicalDetails: err.stack || err.toString(),
         });
       }
     } finally {
@@ -1135,6 +1145,7 @@ export default function App() {
         onClose={() => setIsSettingsOpen(false)}
         settings={settings}
         onSave={handleSaveSettings}
+        onErrorTrigger={(err) => setActiveError(err)}
       />
 
       <HelpModal
@@ -1148,6 +1159,7 @@ export default function App() {
         checking={isCheckingUpdate}
         release={latestRelease}
         onCheckAgain={() => handleCheckUpdate(true)}
+        onErrorTrigger={(err) => setActiveError(err)}
       />
 
       <ArtifactPreview
@@ -1155,6 +1167,13 @@ export default function App() {
         onClose={() => setActiveArtifact(null)}
         code={activeArtifact?.code || ''}
         language={activeArtifact?.language || ''}
+      />
+
+      {/* Modal de Erro Global com Copiar Log */}
+      <ErrorModal
+        isOpen={activeError !== null}
+        onClose={() => setActiveError(null)}
+        errorInfo={activeError}
       />
     </div>
   );

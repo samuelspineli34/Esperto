@@ -1,4 +1,5 @@
 import { Message, Attachment } from '../lib/db';
+import { invoke } from '@tauri-apps/api/core';
 
 export interface OllamaModelTag {
   name: string;
@@ -24,46 +25,47 @@ interface StreamOptions {
   signal?: AbortSignal;
 }
 
-// Usamos 127.0.0.1 fixo para evitar a lentidão de resolução IPv6 do Windows
 const OLLAMA_HOST = 'http://127.0.0.1:11434';
 
-export async function checkOllamaOnline(): Promise<boolean> {
+/**
+ * Busca a lista de modelos do Ollama priorizando a chamada nativa do Rust
+ */
+export async function getInstalledOllamaModels(): Promise<{ models: OllamaModelTag[]; error?: string }> {
+  // 1. Tenta via comando nativo do Rust (100% livre de bloqueios do WebView2)
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 4000); // 4 segundos de tolerância
+    const rawJson = await invoke<string>('fetch_ollama_tags');
+    const data = JSON.parse(rawJson);
+    return { models: (data.models as OllamaModelTag[]) || [] };
+  } catch (rustErr: any) {
+    const rustMsg = rustErr?.toString() || '';
 
-    const res = await fetch(`${OLLAMA_HOST}/api/tags`, {
-      method: 'GET',
-      headers: { 'Accept': 'application/json' },
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
-    return res.ok;
-  } catch (err) {
-    console.warn('[Esperto] Falha ao checar status do Ollama:', err);
-    return false;
+    // 2. Fallback caso esteja rodando no navegador puro (npm run dev)
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 4000);
+      const res = await fetch(`${OLLAMA_HOST}/api/tags`, {
+        headers: { Accept: 'application/json' },
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      if (res.ok) {
+        const data = await res.json();
+        return { models: (data.models as OllamaModelTag[]) || [] };
+      }
+      return { models: [], error: `HTTP ${res.status}: ${await res.text()}` };
+    } catch (fetchErr: any) {
+      return {
+        models: [],
+        error: `Falha no canal nativo Rust (${rustMsg}) e no canal Web (${fetchErr?.message || fetchErr})`,
+      };
+    }
   }
 }
 
-export async function getInstalledOllamaModels(): Promise<OllamaModelTag[]> {
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
-
-    const res = await fetch(`${OLLAMA_HOST}/api/tags`, {
-      method: 'GET',
-      headers: { 'Accept': 'application/json' },
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
-
-    if (!res.ok) return [];
-    const data = await res.json();
-    return (data.models as OllamaModelTag[]) || [];
-  } catch (err) {
-    console.warn('[Esperto] Erro ao buscar lista de modelos do Ollama:', err);
-    return [];
-  }
+export async function checkOllamaOnline(): Promise<boolean> {
+  const result = await getInstalledOllamaModels();
+  return !result.error && Array.isArray(result.models);
 }
 
 export async function* streamOllama({
@@ -97,15 +99,8 @@ export async function* streamOllama({
     }
   });
 
-  const currentUserMsg: any = {
-    role: 'user',
-    content: newMessage,
-  };
-
-  if (images.length > 0) {
-    currentUserMsg.images = images;
-  }
-
+  const currentUserMsg: any = { role: 'user', content: newMessage };
+  if (images.length > 0) currentUserMsg.images = images;
   messagesPayload.push(currentUserMsg);
 
   const cleanModelName = model.startsWith('ollama:') ? model.replace('ollama:', '') : model;
@@ -115,9 +110,7 @@ export async function* streamOllama({
   try {
     res = await fetch(`${OLLAMA_HOST}/api/chat`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: cleanModelName,
         messages: messagesPayload,

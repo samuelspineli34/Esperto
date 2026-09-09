@@ -2,17 +2,19 @@ import React, { useState, useEffect } from 'react';
 import { X, Eye, BookOpen, Key, Sparkles, Trash2, Globe, Sliders, Image, BrainCircuit, Cpu, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
 import { ModelSelector } from './ModelSelector';
 import { Settings } from '../lib/db';
-import { checkOllamaOnline, getInstalledOllamaModels } from '../services/ollama';
+import { getInstalledOllamaModels } from '../services/ollama';
 import { registerLocalOllamaModels } from '../lib/models';
+import { AppErrorInfo } from './ErrorModal';
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
   settings: Settings;
   onSave: (settings: Settings) => void;
+  onErrorTrigger: (error: AppErrorInfo) => void;
 }
 
-export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings: initialSettings, onSave }) => {
+export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings: initialSettings, onSave, onErrorTrigger }) => {
   const [form, setForm] = useState<Settings>(initialSettings);
   const [ollamaOnline, setOllamaOnline] = useState(false);
   const [ollamaCount, setOllamaCount] = useState(0);
@@ -24,18 +26,29 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings: init
 
   useEffect(() => {
     if (isOpen) {
-      checkOllama();
+      checkOllama(false);
     }
   }, [isOpen]);
 
-  const checkOllama = async () => {
+  const checkOllama = async (showModalOnError = true) => {
     setCheckingOllama(true);
-    const online = await checkOllamaOnline();
-    setOllamaOnline(online);
-    if (online) {
-      const tags = await getInstalledOllamaModels();
-      setOllamaCount(tags.length);
-      registerLocalOllamaModels(tags);
+    const result = await getInstalledOllamaModels();
+    
+    if (result.error) {
+      setOllamaOnline(false);
+      setOllamaCount(0);
+      if (showModalOnError) {
+        onErrorTrigger({
+          title: 'Falha ao Conectar com o Ollama',
+          context: 'Sincronização de Modelos Locais (Porta 11434)',
+          message: 'O Esperto não conseguiu falar com o motor do Ollama. Verifique se o servidor local está ativo no Windows.',
+          technicalDetails: result.error,
+        });
+      }
+    } else {
+      setOllamaOnline(true);
+      setOllamaCount(result.models.length);
+      registerLocalOllamaModels(result.models);
     }
     setCheckingOllama(false);
   };
@@ -45,7 +58,6 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings: init
   return (
     <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
       <div className="bg-surface border border-purple-900/40 rounded-3xl w-full max-w-4xl p-6 relative shadow-2xl shadow-purple-950/80 max-h-[92vh] flex flex-col">
-        {/* Botão Fechar */}
         <button
           onClick={onClose}
           className="absolute top-5 right-5 text-gray-400 hover:text-white p-1 rounded-lg hover:bg-surfaceHover transition cursor-pointer"
@@ -53,7 +65,6 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings: init
           <X size={20} />
         </button>
 
-        {/* Cabeçalho */}
         <div className="flex items-center gap-2.5 mb-5 pb-3 border-b border-purple-950/40">
           <div className="p-2 rounded-xl bg-purple-900/40 text-purple-300 border border-purple-500/30 shadow-inner">
             <Eye size={20} />
@@ -64,9 +75,7 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings: init
           </div>
         </div>
 
-        {/* Conteúdo em 2 Colunas */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 overflow-y-auto flex-1 pr-1">
-          {/* COLUNA ESQUERDA: Modelos e Chaves */}
           <div className="space-y-4 flex flex-col">
             <div>
               <label className="text-xs font-semibold text-purple-200 mb-2 flex items-center gap-1.5">
@@ -79,7 +88,6 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings: init
               />
             </div>
 
-            {/* Seção Ollama Local */}
             <div className="p-3.5 bg-emerald-950/20 border border-emerald-900/40 rounded-2xl space-y-2.5">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
@@ -89,9 +97,9 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings: init
 
                 <button
                   type="button"
-                  onClick={checkOllama}
+                  onClick={() => checkOllama(true)}
                   disabled={checkingOllama}
-                  className="text-[11px] text-emerald-300 hover:text-emerald-200 flex items-center gap-1 bg-emerald-950/60 px-2 py-1 rounded-lg border border-emerald-800/40 transition cursor-pointer"
+                  className="text-[11px] text-emerald-300 hover:text-emerald-200 flex items-center gap-1 bg-emerald-950/60 px-2 py-1 rounded-lg border border-emerald-800/40 transition cursor-pointer disabled:opacity-50"
                 >
                   <RefreshCw size={11} className={checkingOllama ? 'animate-spin' : ''} />
                   <span>Sincronizar</span>
@@ -106,21 +114,19 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings: init
                     <AlertCircle size={14} className="text-amber-400" />
                   )}
                   <span className="font-mono text-[11px] text-gray-300">
-                    {ollamaOnline ? `Online (${ollamaCount} modelos locais)` : 'Offline (Inicie com ollama serve)'}
+                    {ollamaOnline ? `Online (${ollamaCount} modelos locais prontos)` : 'Offline (Clique em Sincronizar para ver o log)'}
                   </span>
                 </div>
                 <span className="text-[10px] text-gray-500 font-mono">127.0.0.1:11434</span>
               </div>
             </div>
 
-            {/* Parâmetros Avançados */}
             <div className="p-3.5 bg-background/50 border border-purple-900/30 rounded-2xl space-y-3">
               <span className="text-xs font-bold text-purple-200 flex items-center gap-1.5">
                 <Sliders size={13} className="text-purple-400" />
                 <span>Parâmetros de Inferência</span>
               </span>
 
-              {/* Temperature */}
               <div>
                 <div className="flex justify-between text-[11px] text-purple-300 mb-1">
                   <span>Temperature (Criatividade):</span>
@@ -137,7 +143,6 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings: init
                 />
               </div>
 
-              {/* Thinking Level & Resolução */}
               <div className="grid grid-cols-2 gap-2 pt-1">
                 <div>
                   <label className="text-[11px] font-medium text-purple-300 mb-1 flex items-center gap-1">
@@ -173,7 +178,6 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings: init
                 </div>
               </div>
 
-              {/* Google Search Toggle */}
               <div className="pt-1">
                 <button
                   type="button"
@@ -190,7 +194,6 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings: init
               </div>
             </div>
 
-            {/* Chaves de API */}
             <div className="pt-2 border-t border-purple-950/40 space-y-2">
               <div className="flex items-center gap-1.5">
                 <Key size={13} className="text-purple-400" />
@@ -262,7 +265,6 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings: init
             </div>
           </div>
 
-          {/* COLUNA DIREITA: Memória Permanente */}
           <div className="flex flex-col bg-background/50 border border-purple-900/30 rounded-2xl p-4">
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-1.5">
@@ -290,7 +292,6 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings: init
           </div>
         </div>
 
-        {/* Botão Salvar */}
         <div className="pt-4 mt-4 border-t border-purple-950/40 flex justify-center">
           <button
             onClick={() => {

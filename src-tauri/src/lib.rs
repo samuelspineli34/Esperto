@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::{Read, Write};
+use std::net::TcpStream;
 use std::path::Path;
+use std::time::Duration;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct FileContext {
@@ -85,7 +88,32 @@ fn read_multiple_directories(dir_paths: Vec<String>) -> Result<Vec<FileContext>,
     Ok(all_files)
 }
 
-// Abre a janela nativa do Windows para selecionar pastas sem digitar caminhos
+// Conexão direta via TCP nativo do Windows com o Ollama (bypassa 100% de bloqueios de CORS/WebView2)
+#[tauri::command]
+fn fetch_ollama_tags() -> Result<String, String> {
+    let addr = "127.0.0.1:11434";
+    let socket_addr = addr.parse().map_err(|e| format!("Endereço local inválido: {}", e))?;
+
+    let mut stream = TcpStream::connect_timeout(&socket_addr, Duration::from_millis(2500))
+        .map_err(|e| format!("Não foi possível conectar ao Ollama em {}: {}. O comando 'ollama serve' está rodando no terminal?", addr, e))?;
+
+    stream.set_read_timeout(Some(Duration::from_millis(4000))).map_err(|e| e.to_string())?;
+
+    let request = format!("GET /api/tags HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nAccept: application/json\r\n\r\n", addr);
+    stream.write_all(request.as_bytes()).map_err(|e| format!("Erro ao enviar requisição ao Ollama: {}", e))?;
+
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).map_err(|e| format!("Erro ao receber resposta do Ollama: {}", e))?;
+
+    let response_str = String::from_utf8_lossy(&response);
+    if let Some(idx) = response_str.find("\r\n\r\n") {
+        let body = &response_str[idx + 4..];
+        Ok(body.to_string())
+    } else {
+        Err("Resposta inválida do serviço Ollama".to_string())
+    }
+}
+
 #[tauri::command]
 fn select_folder() -> Result<Option<String>, String> {
     #[cfg(target_os = "windows")]
@@ -178,6 +206,7 @@ pub fn run() {
     .invoke_handler(tauri::generate_handler![
         open_url, 
         read_multiple_directories,
+        fetch_ollama_tags,
         select_folder,
         write_file,
         execute_terminal_command
