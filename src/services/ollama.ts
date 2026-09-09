@@ -24,16 +24,23 @@ interface StreamOptions {
   signal?: AbortSignal;
 }
 
-const OLLAMA_HOST = 'http://localhost:11434';
+// Usamos 127.0.0.1 fixo para evitar a lentidão de resolução IPv6 do Windows
+const OLLAMA_HOST = 'http://127.0.0.1:11434';
 
 export async function checkOllamaOnline(): Promise<boolean> {
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 1500);
-    const res = await fetch(`${OLLAMA_HOST}/api/version`, { signal: controller.signal });
+    const timeout = setTimeout(() => controller.abort(), 4000); // 4 segundos de tolerância
+
+    const res = await fetch(`${OLLAMA_HOST}/api/tags`, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+      signal: controller.signal,
+    });
     clearTimeout(timeout);
     return res.ok;
-  } catch {
+  } catch (err) {
+    console.warn('[Esperto] Falha ao checar status do Ollama:', err);
     return false;
   }
 }
@@ -41,14 +48,20 @@ export async function checkOllamaOnline(): Promise<boolean> {
 export async function getInstalledOllamaModels(): Promise<OllamaModelTag[]> {
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3000);
-    const res = await fetch(`${OLLAMA_HOST}/api/tags`, { signal: controller.signal });
+    const timeout = setTimeout(() => controller.abort(), 5000);
+
+    const res = await fetch(`${OLLAMA_HOST}/api/tags`, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+      signal: controller.signal,
+    });
     clearTimeout(timeout);
 
     if (!res.ok) return [];
     const data = await res.json();
     return (data.models as OllamaModelTag[]) || [];
-  } catch {
+  } catch (err) {
+    console.warn('[Esperto] Erro ao buscar lista de modelos do Ollama:', err);
     return [];
   }
 }
@@ -111,19 +124,19 @@ export async function* streamOllama({
         options: {
           temperature,
           top_p: topP,
-          top_k: 40,                   // Melhora foco e sintaxe de código
-          repeat_penalty: 1.1,         // Impede loops repetitivos de código
-          num_ctx: targetContext,      // 16k ou 8k dependendo do modelo
-          num_predict: -1,             // Geração infinita sem corte
-          num_thread: 6,               // 6 núcleos físicos do Ryzen 5600X
+          top_k: 40,
+          repeat_penalty: 1.1,
+          num_ctx: targetContext,
+          num_predict: -1,
+          num_thread: 6,
         },
         keep_alive: '24h',
         stream: true,
       }),
       signal,
     });
-  } catch {
-    throw new Error(`Não foi possível conectar ao Ollama em ${OLLAMA_HOST}. Verifique se ele está rodando.`);
+  } catch (err: any) {
+    throw new Error(`Não foi possível conectar ao Ollama em ${OLLAMA_HOST}. Verifique se o comando 'ollama serve' está ativo.`);
   }
 
   if (!res.ok) {
