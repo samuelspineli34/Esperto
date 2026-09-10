@@ -158,6 +158,7 @@ export const UpdateModal: React.FC<Props> = ({
               </p>
             </div>
 
+            {/* Barra de Progresso */}
             {downloading && (
               <div className="space-y-2 py-2">
                 <div className="flex justify-between text-xs text-purple-300 font-mono">
@@ -173,6 +174,7 @@ export const UpdateModal: React.FC<Props> = ({
               </div>
             )}
 
+            {/* Botões de Ação */}
             {!downloading ? (
               <div className="space-y-2">
                 <button

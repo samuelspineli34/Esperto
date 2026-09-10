@@ -5,7 +5,7 @@ export interface ReleaseInfo {
   body: string;
   publishedAt: string;
   htmlUrl: string;
-  downloadUrl?: string; // Link direto para o .exe se houver
+  downloadUrl?: string;
   hasUpdate: boolean;
 }
 
@@ -36,17 +36,17 @@ export async function checkForUpdates(): Promise<ReleaseInfo | null> {
 
     if (!res.ok) {
       if (res.status === 404) return null;
-      throw new Error(`Erro ao verificar versão no GitHub (${res.status})`);
+      throw new Error(`Erro ao consultar o GitHub (${res.status})`);
     }
 
     const data = await res.json();
     const latestTag = data.tag_name || data.name || '';
     const hasUpdate = isNewerVersion(latestTag, CURRENT_VERSION);
 
-    // Procura por um arquivo .exe ou .msi nos assets do release para download direto opcional
+    // Procura por um arquivo .exe ou instalador nos assets do release
     const assets = data.assets || [];
-    const exeAsset = assets.find((a: any) => a.name.endsWith('.exe') || a.name.endsWith('.msi'));
-    const downloadUrl = exeAsset ? exeAsset.browser_download_url : data.html_url;
+    const installerAsset = assets.find((a: any) => a.name.endsWith('.exe') || a.name.endsWith('.msi') || a.name.endsWith('.zip'));
+    const downloadUrl = installerAsset ? installerAsset.browser_download_url : data.html_url;
 
     return {
       version: latestTag.replace(/^v/, ''),
@@ -58,8 +58,8 @@ export async function checkForUpdates(): Promise<ReleaseInfo | null> {
       downloadUrl,
       hasUpdate,
     };
-  } catch (err) {
-    console.error('Erro ao checar atualizações:', err);
+  } catch (err: any) {
+    console.warn('Erro ao checar atualizações no GitHub:', err);
     return null;
   }
 }
