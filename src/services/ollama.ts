@@ -27,38 +27,25 @@ interface StreamOptions {
 
 const OLLAMA_HOST = 'http://127.0.0.1:11434';
 
-/**
- * Garante que o Ollama está rodando em segundo plano sem janela
- */
-export async function autoStartOllamaIfDead(): Promise<void> {
-  try {
-    await invoke('start_ollama_service');
-  } catch (err) {
-    console.warn('[Esperto] Tentativa de auto-start do Ollama:', err);
-  }
+// Detecta se o modelo tem visão (capacidade multimodal)
+function isVisionModel(modelName: string): boolean {
+  const lower = modelName.toLowerCase();
+  return lower.includes('vl') || lower.includes('vision') || lower.includes('llava') || lower.includes('moondream') || lower.includes('minicpm');
 }
 
-/**
- * Busca a lista de modelos do Ollama (acorda o Ollama silenciosamente se ele estiver desligado)
- */
 export async function getInstalledOllamaModels(): Promise<{ models: OllamaModelTag[]; error?: string }> {
-  // 1. Tenta buscar normalmente
   try {
     const rawJson = await invoke<string>('fetch_ollama_tags');
     const data = JSON.parse(rawJson);
     return { models: (data.models as OllamaModelTag[]) || [] };
   } catch (initialErr: any) {
-    // 2. Se falhou (porque o Ollama está fechado), acorda o Ollama silenciosamente por baixo dos panos!
     try {
       await invoke('start_ollama_service');
-      // Tenta de novo após acordar o processo
       const retryJson = await invoke<string>('fetch_ollama_tags');
       const data = JSON.parse(retryJson);
       return { models: (data.models as OllamaModelTag[]) || [] };
     } catch (rustErr: any) {
       const rustMsg = rustErr?.toString() || '';
-
-      // Fallback para caso esteja rodando no navegador puro (npm run dev)
       try {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 4000);
@@ -99,6 +86,23 @@ export async function* streamOllama({
   contextLength,
   signal,
 }: StreamOptions) {
+  const cleanModelName = model.startsWith('ollama:') ? model.replace('ollama:', '') : model;
+
+  const images: string[] = [];
+  attachments.forEach((att) => {
+    if (att.mimeType.startsWith('image/')) {
+      images.push(att.data);
+    }
+  });
+
+  // Proteção Amigável: Avisa antes de quebrar se tentar mandar imagem para modelo que só lê texto
+  if (images.length > 0 && !isVisionModel(cleanModelName)) {
+    throw new Error(
+      `O modelo local '${cleanModelName}' é focado em texto/código e NÃO suporta imagens. ` +
+      `Remova o anexo de imagem da mensagem, ou use um modelo com suporte a visão (como o Gemini 3.7 Flash ou o modelo local 'qwen2-vl').`
+    );
+  }
+
   const boundedHistory = history.slice(-25);
 
   const messagesPayload: any[] = [
@@ -112,18 +116,10 @@ export async function* streamOllama({
     })),
   ];
 
-  const images: string[] = [];
-  attachments.forEach((att) => {
-    if (att.mimeType.startsWith('image/')) {
-      images.push(att.data);
-    }
-  });
-
   const currentUserMsg: any = { role: 'user', content: newMessage };
   if (images.length > 0) currentUserMsg.images = images;
   messagesPayload.push(currentUserMsg);
 
-  const cleanModelName = model.startsWith('ollama:') ? model.replace('ollama:', '') : model;
   const targetContext = contextLength || (cleanModelName.toLowerCase().includes('14b') ? 8192 : 16384);
 
   let res: Response;
@@ -149,7 +145,7 @@ export async function* streamOllama({
       signal,
     });
   } catch (err: any) {
-    throw new Error(`Não foi possível conectar ao Ollama em ${OLLAMA_HOST}. Verifique se o comando 'ollama serve' está ativo.`);
+    throw new Error(`Não foi possível conectar ao Ollama em ${OLLAMA_HOST}. Verifique se o servidor está ativo.`);
   }
 
   if (!res.ok) {
