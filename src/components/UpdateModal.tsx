@@ -35,21 +35,19 @@ export const UpdateModal: React.FC<Props> = ({
     try {
       setDownloading(true);
       setUpdateError(false);
-      setStatusText('Buscando pacote oficial de atualização...');
+      setStatusText('Verificando manifesto de atualização do Tauri...');
 
       const update = await check();
+      
+      // Se o Tauri retornar nulo (falta de latest.json assinado no GitHub), abrimos o instalador direto pelo navegador
       if (!update) {
-        // Se o plugin do Tauri não encontrar o manifesto assinado, dá fallback direto pro instalador do GitHub
-        setStatusText('Atualizador automático não assinado. Use o download direto.');
-        setUpdateError(true);
         setDownloading(false);
-        onErrorTrigger({
-          title: 'Atualização Automática Não Configurada',
-          context: 'Tauri Updater Plugin',
-          message: 'O instalador desta versão não possui a assinatura digital (.sig) no GitHub Releases. Clique no botão abaixo para baixar o instalador diretamente.',
-          technicalDetails: 'Tauri check() retornou null. O repositório precisa do asset latest.json para atualização silenciosa in-app.',
-        });
-        return;
+        setUpdateError(true);
+        if (release?.downloadUrl) {
+          await invoke('open_url', { url: release.downloadUrl });
+          return;
+        }
+        throw new Error('O repositório do GitHub não possui o manifesto latest.json assinado necessário para atualização em segundo plano. Use o botão de baixar pelo navegador.');
       }
 
       let downloaded = 0;
@@ -82,24 +80,35 @@ export const UpdateModal: React.FC<Props> = ({
       }, 1500);
 
     } catch (err: any) {
-      console.error('Erro ao atualizar automaticamente:', err);
-      setUpdateError(true);
+      console.error('Erro ao atualizar:', err);
       setDownloading(false);
+      setUpdateError(true);
+
+      // Abre automaticamente o instalador no navegador se falhar a atualização em background
+      if (release?.downloadUrl) {
+        try {
+          await invoke('open_url', { url: release.downloadUrl });
+        } catch {
+          window.open(release.downloadUrl, '_blank');
+        }
+      }
+
       onErrorTrigger({
-        title: 'Falha no Download da Atualização',
-        context: 'Processo de Download e Instalação do Tauri',
-        message: 'Ocorreu um erro ao baixar ou aplicar os arquivos da nova versão.',
-        technicalDetails: err?.stack || err?.toString() || JSON.stringify(err),
+        title: 'Atualização Automática Indisponível',
+        context: 'Tauri Updater / GitHub Releases',
+        message: 'O aplicativo tentou a atualização em segundo plano, mas o GitHub não possui o manifesto assinado exigido pelo Tauri. O Esperto abriu o instalador direto no seu navegador como alternativa.',
+        technicalDetails: err?.message || err?.toString() || 'Could not fetch a valid release JSON from remote.',
       });
     }
   };
 
   const handleOpenBrowser = async () => {
-    if (!release?.htmlUrl) return;
+    const targetUrl = release?.downloadUrl || release?.htmlUrl;
+    if (!targetUrl) return;
     try {
-      await invoke('open_url', { url: release.htmlUrl });
+      await invoke('open_url', { url: targetUrl });
     } catch {
-      window.open(release.htmlUrl, '_blank');
+      window.open(targetUrl, '_blank');
     }
   };
 
@@ -171,14 +180,14 @@ export const UpdateModal: React.FC<Props> = ({
                   className="w-full flex items-center justify-center gap-2 bg-linear-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white font-semibold py-2.5 rounded-xl transition text-sm shadow-lg shadow-purple-950/60 cursor-pointer"
                 >
                   <Download size={16} />
-                  <span>Atualizar Automaticamente ({release.tagName})</span>
+                  <span>Baixar / Atualizar ({release.tagName})</span>
                 </button>
 
                 <button
                   onClick={handleOpenBrowser}
                   className="w-full flex items-center justify-center gap-1.5 text-xs text-purple-300 hover:text-purple-200 p-2 rounded-xl bg-surface border border-purple-900/40 transition cursor-pointer"
                 >
-                  <span>Baixar Instalador pelo Navegador (.exe)</span>
+                  <span>Abrir Página do GitHub (.exe)</span>
                   <ExternalLink size={13} />
                 </button>
               </div>

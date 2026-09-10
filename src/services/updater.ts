@@ -5,10 +5,10 @@ export interface ReleaseInfo {
   body: string;
   publishedAt: string;
   htmlUrl: string;
+  downloadUrl?: string; // Link direto para o .exe se houver
   hasUpdate: boolean;
 }
 
-// Pega a versão injetada no momento do build (ex: v0.1.1, v0.1.2)
 export const CURRENT_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'v0.1.0';
 const REPO_OWNER = 'samuelspineli34';
 const REPO_NAME = 'Esperto';
@@ -36,12 +36,17 @@ export async function checkForUpdates(): Promise<ReleaseInfo | null> {
 
     if (!res.ok) {
       if (res.status === 404) return null;
-      throw new Error(`Erro ao verificar versão (${res.status})`);
+      throw new Error(`Erro ao verificar versão no GitHub (${res.status})`);
     }
 
     const data = await res.json();
     const latestTag = data.tag_name || data.name || '';
     const hasUpdate = isNewerVersion(latestTag, CURRENT_VERSION);
+
+    // Procura por um arquivo .exe ou .msi nos assets do release para download direto opcional
+    const assets = data.assets || [];
+    const exeAsset = assets.find((a: any) => a.name.endsWith('.exe') || a.name.endsWith('.msi'));
+    const downloadUrl = exeAsset ? exeAsset.browser_download_url : data.html_url;
 
     return {
       version: latestTag.replace(/^v/, ''),
@@ -50,6 +55,7 @@ export async function checkForUpdates(): Promise<ReleaseInfo | null> {
       body: data.body || 'Melhorias de desempenho e correções.',
       publishedAt: new Date(data.published_at).toLocaleDateString('pt-BR'),
       htmlUrl: data.html_url,
+      downloadUrl,
       hasUpdate,
     };
   } catch (err) {
