@@ -88,14 +88,48 @@ fn read_multiple_directories(dir_paths: Vec<String>) -> Result<Vec<FileContext>,
     Ok(all_files)
 }
 
-// Conexão direta via TCP nativo do Windows com o Ollama (bypassa 100% de bloqueios de CORS/WebView2)
+// 🔥 NOVO: Inicia o Ollama em segundo plano 100% INVISÍVEL (sem abrir janela preta do CMD)
+#[tauri::command]
+fn start_ollama_service() -> Result<String, String> {
+    let addr = "127.0.0.1:11434";
+    let socket_addr = addr.parse().map_err(|e| format!("Endereço local inválido: {}", e))?;
+
+    // 1. Testa se o Ollama já está rodando
+    if TcpStream::connect_timeout(&socket_addr, Duration::from_millis(400)).is_ok() {
+        return Ok("Ollama já está ativo em segundo plano.".to_string());
+    }
+
+    // 2. Se estiver fechado, inicia o executável silenciosamente
+    let mut cmd = std::process::Command::new("ollama");
+    cmd.arg("serve");
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000; // Flag que esconde a janela do CMD
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    cmd.spawn().map_err(|e| format!("Falha ao disparar o executável do Ollama: {}", e))?;
+
+    // 3. Aguarda até 4 segundos para o servidor responder na porta
+    for _ in 0..8 {
+        std::thread::sleep(Duration::from_millis(500));
+        if TcpStream::connect_timeout(&socket_addr, Duration::from_millis(400)).is_ok() {
+            return Ok("Ollama iniciado com sucesso em segundo plano!".to_string());
+        }
+    }
+
+    Err("O comando de iniciar o Ollama foi disparado, mas o servidor demorou para responder.".to_string())
+}
+
 #[tauri::command]
 fn fetch_ollama_tags() -> Result<String, String> {
     let addr = "127.0.0.1:11434";
     let socket_addr = addr.parse().map_err(|e| format!("Endereço local inválido: {}", e))?;
 
     let mut stream = TcpStream::connect_timeout(&socket_addr, Duration::from_millis(2500))
-        .map_err(|e| format!("Não foi possível conectar ao Ollama em {}: {}. O comando 'ollama serve' está rodando no terminal?", addr, e))?;
+        .map_err(|e| format!("Não foi possível conectar ao Ollama em {}: {}", addr, e))?;
 
     stream.set_read_timeout(Some(Duration::from_millis(4000))).map_err(|e| e.to_string())?;
 
@@ -206,6 +240,7 @@ pub fn run() {
     .invoke_handler(tauri::generate_handler![
         open_url, 
         read_multiple_directories,
+        start_ollama_service, // <--- Registrado!
         fetch_ollama_tags,
         select_folder,
         write_file,
