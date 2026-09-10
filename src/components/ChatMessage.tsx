@@ -14,7 +14,7 @@ interface Props {
   onEdit?: (newContent: string) => void;
   onRetry?: () => void;
   onOpenArtifact?: (code: string, language: string) => void;
-  onFileWritten?: (savedPath: string) => void; // Dispara atualização automática do projeto
+  onFileWritten?: (savedPath: string) => void;
 }
 
 const AgentFileActionCard: React.FC<{
@@ -32,9 +32,12 @@ const AgentFileActionCard: React.FC<{
     try {
       let finalPath = filePath.trim();
 
+      // Resolve caminho absoluto com base na primeira pasta do workspace aberta
       if (!finalPath.includes(':') && !finalPath.startsWith('/') && baseDirectories.length > 0) {
         const base = baseDirectories[0].replace(/[\\/]$/, '');
-        finalPath = `${base}/${finalPath.replace(/^[\\/]/, '')}`;
+        // Garante barras invertidas corretas no Windows
+        const cleanRelative = finalPath.replace(/^[\\/]/, '').replace(/\//g, '\\');
+        finalPath = `${base}\\${cleanRelative}`;
       }
 
       await invoke('write_file', {
@@ -48,7 +51,7 @@ const AgentFileActionCard: React.FC<{
     } catch (err: any) {
       console.error(err);
       setStatus('error');
-      setErrorMsg(err?.toString() || 'Erro ao gravar arquivo.');
+      setErrorMsg(err?.toString() || 'Erro ao gravar arquivo no disco.');
     }
   };
 
@@ -59,13 +62,13 @@ const AgentFileActionCard: React.FC<{
           <div className="p-1.5 rounded-lg bg-emerald-900/50 text-emerald-300 border border-emerald-500/30">
             <Save size={14} />
           </div>
-          <div>
-            <span className="text-xs font-bold text-emerald-200 block font-mono">{filePath}</span>
+          <div className="overflow-hidden">
+            <span className="text-xs font-bold text-emerald-200 block font-mono truncate max-w-md" title={filePath}>{filePath}</span>
             <span className="text-[10px] text-emerald-400/80">Ação do Agente • Pronto para gravar no disco</span>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={() => setShowCode(!showCode)}
             className="text-[11px] text-emerald-400 hover:text-emerald-200 px-2 py-1 rounded-lg hover:bg-emerald-900/30 transition flex items-center gap-1 cursor-pointer font-mono"
@@ -80,7 +83,7 @@ const AgentFileActionCard: React.FC<{
             className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 shadow-md cursor-pointer ${
               status === 'success'
                 ? 'bg-emerald-600 text-white'
-                : 'bg-linear-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white'
+                : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white'
             }`}
           >
             {status === 'writing' ? (
@@ -101,7 +104,7 @@ const AgentFileActionCard: React.FC<{
       </div>
 
       {status === 'error' && (
-        <div className="p-2 bg-red-950/60 text-red-300 text-xs font-mono border-b border-red-900/40">
+        <div className="p-2.5 bg-red-950/60 text-red-300 text-xs font-mono border-b border-red-900/40 whitespace-pre-wrap">
           ⚠️ {errorMsg}
         </div>
       )}
@@ -133,13 +136,24 @@ const AgentCommandActionCard: React.FC<{
     setRunning(true);
     try {
       const cwd = baseDirectories.length > 0 ? baseDirectories[0] : null;
+      
+      // Limpa comentários `#` espalhados pelo modelo no comando do Windows CMD
+      let cleanCmd = command
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line && !line.startsWith('#'))
+        .join(' && ');
+
+      // Substitui múltiplos `#` inline
+      cleanCmd = cleanCmd.replace(/#.*?(?=[a-zA-Z])/g, '&& ');
+
       const res = await invoke<string>('execute_terminal_command', {
-        command: command.trim(),
+        command: cleanCmd,
         cwd,
       });
-      setOutput(res || 'Comando executado com sucesso (sem saída).');
+      setOutput(res || 'Comando executado com sucesso (sem saída no console).');
     } catch (err: any) {
-      setOutput(`Erro: ${err?.toString()}`);
+      setOutput(`Erro ao executar: ${err?.toString()}`);
     } finally {
       setRunning(false);
     }
@@ -148,20 +162,20 @@ const AgentCommandActionCard: React.FC<{
   return (
     <div className="my-3 rounded-2xl border border-purple-500/40 bg-[#120e1a] overflow-hidden shadow-xl">
       <div className="flex items-center justify-between p-3 bg-purple-950/40 border-b border-purple-900/30">
-        <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded-lg bg-purple-900/50 text-purple-300 border border-purple-500/30">
+        <div className="flex items-center gap-2 overflow-hidden">
+          <div className="p-1.5 rounded-lg bg-purple-900/50 text-purple-300 border border-purple-500/30 shrink-0">
             <Terminal size={14} />
           </div>
-          <div>
-            <span className="text-xs font-bold text-purple-200 block font-mono">{command}</span>
-            <span className="text-[10px] text-purple-400/80">Comando sugerido pelo Agente</span>
+          <div className="overflow-hidden">
+            <span className="text-xs font-bold text-purple-200 block font-mono truncate" title={command}>{command}</span>
+            <span className="text-[10px] text-purple-400/80">Comando sugerido pelo Agente para o Windows CMD</span>
           </div>
         </div>
 
         <button
           onClick={handleRun}
           disabled={running}
-          className="bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+          className="bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shrink-0"
         >
           <Terminal size={13} />
           <span>{running ? 'Executando...' : 'Executar Comando'}</span>
@@ -169,7 +183,7 @@ const AgentCommandActionCard: React.FC<{
       </div>
 
       {output && (
-        <pre className="p-3 bg-black/60 text-purple-200 text-xs font-mono max-h-48 overflow-auto whitespace-pre-wrap">
+        <pre className="p-3 bg-black/80 text-purple-200 text-xs font-mono max-h-48 overflow-auto whitespace-pre-wrap select-text">
           {output}
         </pre>
       )}
@@ -369,7 +383,7 @@ export const ChatMessage: React.FC<Props> = ({
           isError
             ? 'bg-red-950 text-red-400 border border-red-800/50'
             : isBot
-            ? 'bg-linear-to-br from-purple-700 via-indigo-800 to-black text-purple-200 border border-purple-500/30'
+            ? 'bg-gradient-to-br from-purple-700 via-indigo-800 to-black text-purple-200 border border-purple-500/30'
             : 'bg-gray-800 text-gray-300 border border-gray-700'
         }`}
       >
