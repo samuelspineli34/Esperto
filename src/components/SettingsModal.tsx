@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Eye, BookOpen, Key, Sparkles, Trash2, Globe, Sliders, Image, BrainCircuit, Cpu, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
 import { ModelSelector } from './ModelSelector';
-import { Settings } from '../lib/db';
+import { Settings, db } from '../lib/db';
 import { getInstalledOllamaModels } from '../services/ollama';
 import { registerLocalOllamaModels } from '../lib/models';
 import { AppErrorInfo } from './ErrorModal';
@@ -33,7 +33,7 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings: init
   const checkOllama = async (showModalOnError = true) => {
     setCheckingOllama(true);
     const result = await getInstalledOllamaModels();
-    
+
     if (result.error) {
       setOllamaOnline(false);
       setOllamaCount(0);
@@ -182,11 +182,10 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings: init
                 <button
                   type="button"
                   onClick={() => setForm((prev) => ({ ...prev, googleSearch: !prev.googleSearch }))}
-                  className={`w-full py-2 px-3 rounded-xl border text-xs font-semibold transition flex items-center justify-center gap-2 cursor-pointer ${
-                    form.googleSearch
+                  className={`w-full py-2 px-3 rounded-xl border text-xs font-semibold transition flex items-center justify-center gap-2 cursor-pointer ${form.googleSearch
                       ? 'bg-purple-950/80 text-purple-300 border-purple-500/50'
                       : 'bg-surface text-gray-500 border-purple-900/30 hover:text-gray-300'
-                  }`}
+                    }`}
                 >
                   <Globe size={13} />
                   <span>{form.googleSearch ? 'Busca Web Google: ATIVA' : 'Busca Web Google: DESATIVADA'}</span>
@@ -293,6 +292,34 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings: init
         </div>
 
         <div className="pt-4 mt-4 border-t border-purple-950/40 flex justify-center">
+          <button
+            onClick={() => {
+              onSave(form);
+              onClose();
+            }}
+            className="bg-linear-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white font-semibold px-8 py-2 rounded-xl transition text-xs shadow-md shadow-purple-950/50 cursor-pointer"
+          >
+            Salvar
+          </button>
+        </div>
+
+        <div className="pt-4 mt-4 border-t border-purple-950/40 flex items-center justify-between">
+          <button
+            type="button"
+            onClick={async () => {
+              if (confirm('Deseja limpar todos os chats antigos e caches temporários para liberar espaço no disco C?')) {
+                await db.messages.clear();
+                await db.chats.clear();
+                alert('Cache limpo com sucesso! O disco C foi aliviado.');
+                window.location.reload();
+              }
+            }}
+            className="bg-red-950/40 hover:bg-red-900/50 text-red-300 border border-red-800/40 font-semibold px-4 py-2 rounded-xl transition text-xs cursor-pointer flex items-center gap-1.5"
+          >
+            <Trash2 size={13} />
+            <span>Limpar Histórico e Cache do App</span>
+          </button>
+
           <button
             onClick={() => {
               onSave(form);

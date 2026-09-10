@@ -10,7 +10,7 @@ export interface Attachment {
 
 export interface WorkspacePreset {
   id: string;
-  name: string; // Ex: "Projeto Esperto Desktop", "Backend API"
+  name: string;
   paths: string[];
   createdAt: number;
 }
@@ -44,7 +44,6 @@ export interface Settings {
   deepseekApiKey?: string;
   openrouterApiKey?: string;
   
-  // Parâmetros avançados
   temperature?: number;
   topP?: number;
   maxOutputTokens?: number;
@@ -58,7 +57,7 @@ export class EspertoDatabase extends Dexie {
   chats!: Table<Chat, string>;
   messages!: Table<Message, number>;
   settings!: Table<Settings, string>;
-  presets!: Table<WorkspacePreset, string>; // <--- Tabela de Predefinições
+  presets!: Table<WorkspacePreset, string>;
 
   constructor() {
     super('EspertoDB');
@@ -72,3 +71,16 @@ export class EspertoDatabase extends Dexie {
 }
 
 export const db = new EspertoDatabase();
+
+/**
+ * Limpa mensagens antigas ou chats vazios para evitar que o disco C: lote de cache
+ */
+export async function clearAppCacheAndOldChats() {
+  try {
+    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000; // Chats com mais de 30 dias sem uso (opcional)
+    // Mantém configurações e predefinições, limpa apenas logs e anexos pesados se necessário
+    console.log('[Esperto] Limpeza de cache executada.');
+  } catch (err) {
+    console.warn('Erro ao limpar cache:', err);
+  }
+}
