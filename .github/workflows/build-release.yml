@@ -11,7 +11,6 @@ permissions:
   id-token: write
   attestations: write
 
-# Cancela automaticamente execuções anteriores se houver novo commit na mesma branch
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: true
@@ -73,7 +72,7 @@ jobs:
       - name: Baixar código
         uses: actions/checkout@v4
 
-      # Dependências exclusivas do Linux (WebKit2GTK, FUSE para AppImage e empacotamento)
+      # Dependências exclusivas do Linux
       - name: Instalar Dependências (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
@@ -214,7 +213,7 @@ jobs:
         env:
           TAG: ${{ needs.create-release.outputs.new_version }}
 
-      # Salva os arquivos de cada sistema como artefatos temporários (rápido e sem conflito)
+      # Salva os arquivos de cada sistema como artefatos
       - name: Salvar Artefatos Compilados (Windows)
         if: matrix.os == 'windows-latest'
         uses: actions/upload-artifact@v4
@@ -251,11 +250,14 @@ jobs:
             src-tauri/target/release/bundle/macos/*.sig
           if-no-files-found: ignore
 
-  # 3. Publica todos os arquivos na Release do GitHub de forma limpa, única e sem concorrência
+  # 3. Publica todos os arquivos na Release de forma limpa, segura e sem concorrência
   publish-release:
     needs: [create-release, build-binaries]
     runs-on: ubuntu-latest
     steps:
+      - name: Baixar repositório para contexto git
+        uses: actions/checkout@v4
+
       - name: Baixar todos os artefatos compilados
         uses: actions/download-artifact@v4
         with:
@@ -270,7 +272,8 @@ jobs:
       - name: Enviar Arquivos para a Release no GitHub
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.create-release.outputs.new_version }}
         run: |
-          # O GitHub CLI com --clobber garante upload resiliente e sobrescreve qualquer arquivo parcial anterior
-          gh release upload "$TAG" release-assets/* --clobber
+          gh release upload "$TAG" release-assets/* --clobber --repo "${{ github.repository }}"
