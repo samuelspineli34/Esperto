@@ -88,31 +88,27 @@ fn read_multiple_directories(dir_paths: Vec<String>) -> Result<Vec<FileContext>,
     Ok(all_files)
 }
 
-// 🔥 NOVO: Inicia o Ollama em segundo plano 100% INVISÍVEL (sem abrir janela preta do CMD)
 #[tauri::command]
 fn start_ollama_service() -> Result<String, String> {
     let addr = "127.0.0.1:11434";
     let socket_addr = addr.parse().map_err(|e| format!("Endereço local inválido: {}", e))?;
 
-    // 1. Testa se o Ollama já está rodando
     if TcpStream::connect_timeout(&socket_addr, Duration::from_millis(400)).is_ok() {
         return Ok("Ollama já está ativo em segundo plano.".to_string());
     }
 
-    // 2. Se estiver fechado, inicia o executável silenciosamente
     let mut cmd = std::process::Command::new("ollama");
     cmd.arg("serve");
 
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000; // Flag que esconde a janela do CMD
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
 
     cmd.spawn().map_err(|e| format!("Falha ao disparar o executável do Ollama: {}", e))?;
 
-    // 3. Aguarda até 4 segundos para o servidor responder na porta
     for _ in 0..8 {
         std::thread::sleep(Duration::from_millis(500));
         if TcpStream::connect_timeout(&socket_addr, Duration::from_millis(400)).is_ok() {
@@ -180,31 +176,47 @@ fn select_folder() -> Result<Option<String>, String> {
 
 #[tauri::command]
 fn write_file(path: String, content: String) -> Result<String, String> {
-    let p = Path::new(&path);
+    let clean_path = path.trim().trim_matches('"').trim_matches('\'').trim();
+    if clean_path.is_empty() {
+        return Err("O caminho do arquivo não pode ser vazio.".to_string());
+    }
+
+    let p = Path::new(clean_path);
     if let Some(parent) = p.parent() {
-        if !parent.exists() {
-            fs::create_dir_all(parent).map_err(|e| format!("Erro ao criar diretórios: {}", e))?;
+        if !parent.as_os_str().is_empty() && !parent.exists() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("Erro ao criar diretórios para '{}': {}", clean_path, e))?;
         }
     }
-    fs::write(p, content).map_err(|e| format!("Erro ao gravar arquivo {}: {}", path, e))?;
-    Ok(format!("Arquivo salvo com sucesso em: {}", path))
+
+    fs::write(p, content)
+        .map_err(|e| format!("Erro ao gravar arquivo em '{}': {}", clean_path, e))?;
+
+    Ok(format!("Arquivo salvo com sucesso em: {}", clean_path))
 }
 
 #[tauri::command]
 fn execute_terminal_command(command: String, cwd: Option<String>) -> Result<String, String> {
+    let clean_cmd = command.trim();
+    if clean_cmd.is_empty() {
+        return Ok("Nenhum comando para executar.".to_string());
+    }
+
     let mut cmd = if cfg!(target_os = "windows") {
-        let mut c = std::process::Command::new("cmd");
-        c.args(["/C", &command]);
+        // Usa PowerShell no Windows para suporte nativo a comentários (#), npm, npx e scripts
+        let mut c = std::process::Command::new("powershell");
+        c.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", clean_cmd]);
         c
     } else {
         let mut c = std::process::Command::new("sh");
-        c.args(["-c", &command]);
+        c.args(["-c", clean_cmd]);
         c
     };
 
     if let Some(dir) = cwd {
-        if Path::new(&dir).exists() {
-            cmd.current_dir(dir);
+        let clean_dir = dir.trim().trim_matches('"').trim_matches('\'').to_string();
+        if !clean_dir.is_empty() && Path::new(&clean_dir).exists() {
+            cmd.current_dir(clean_dir);
         }
     }
 
@@ -234,28 +246,28 @@ fn open_url(url: String) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-  tauri::Builder::default()
-    .plugin(tauri_plugin_updater::Builder::new().build())
-    .plugin(tauri_plugin_process::init())
-    .invoke_handler(tauri::generate_handler![
-        open_url, 
-        read_multiple_directories,
-        start_ollama_service, // <--- Registrado!
-        fetch_ollama_tags,
-        select_folder,
-        write_file,
-        execute_terminal_command
-    ])
-    .setup(|app| {
-      if cfg!(debug_assertions) {
-        app.handle().plugin(
-          tauri_plugin_log::Builder::default()
-            .level(log::LevelFilter::Info)
-            .build(),
-        )?;
-      }
-      Ok(())
-    })
-    .run(tauri::generate_context!())
-    .expect("error while running tauri application");
+    tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
+        .invoke_handler(tauri::generate_handler![
+            open_url,
+            read_multiple_directories,
+            start_ollama_service,
+            fetch_ollama_tags,
+            select_folder,
+            write_file,
+            execute_terminal_command
+        ])
+        .setup(|app| {
+            if cfg!(debug_assertions) {
+                app.handle().plugin(
+                    tauri_plugin_log::Builder::default()
+                        .level(log::LevelFilter::Info)
+                        .build(),
+                )?;
+            }
+            Ok(())
+        })
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
 }

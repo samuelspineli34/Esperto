@@ -11,23 +11,49 @@ import { HelpModal } from './components/HelpModal';
 import { ErrorModal, AppErrorInfo } from './components/ErrorModal';
 import { ArtifactPreview } from './components/ArtifactPreview';
 import { checkForUpdates, ReleaseInfo } from './services/updater';
-import { Send, Sliders, Eye, Brain, Copy, Paperclip, X, FileText, Image as ImageIcon, Activity, Square, Timer, Folder, FolderCheck, FolderSync, Plus, Trash2, Download as ExportIcon, Bookmark, BookmarkPlus, DollarSign, Gift, Cpu, FolderSearch } from 'lucide-react';
+import {
+  Send,
+  Sliders,
+  Eye,
+  Brain,
+  Copy,
+  Paperclip,
+  X,
+  FileText,
+  Image as ImageIcon,
+  Activity,
+  Square,
+  Timer,
+  Folder,
+  FolderCheck,
+  FolderSync,
+  Plus,
+  Trash2,
+  Download as ExportIcon,
+  Bookmark,
+  BookmarkPlus,
+  DollarSign,
+  Gift,
+  Cpu,
+  FolderSearch,
+} from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 
 const AGENT_SYSTEM_PROMPT = `Você é o ESPERTO, um Engenheiro de Software Autônomo e Agente de Código de Alta Performance.
-Você tem ACESSO DIRETO ao sistema de arquivos do usuário através da IDE.
+Você tem ACESSO DIRETO ao sistema de arquivos do projeto do usuário através da IDE.
 
-DIRETRIZES DE AGENTE:
-1. Quando for solicitado a criar, modificar ou refatorar arquivos, NUNCA peça para o usuário copiar e colar.
-2. Em vez disso, use a tag de escrita para gravar o arquivo direto no disco:
-<esperto_write path="caminho/do/arquivo.ext">
-// conteúdo completo do arquivo aqui
+REGRAS RÍGIDAS DE GRAVAÇÃO EM DISCO:
+1. Para criar ou alterar arquivos, use SEMPRE a tag:
+<esperto_write path="caminho/relativo/do/arquivo.ext">
+conteúdo completo do arquivo
 </esperto_write>
 
-3. Para executar comandos no terminal do projeto (instalar dependências, rodar testes, compilar):
+2. NUNCA coloque blocos de markdown (\`\`\`) DENTRO da tag <esperto_write>. O conteúdo dentro da tag deve ser EXCLUSIVAMENTE o código-fonte puro.
+3. NUNCA inicie o código com '#' como comentário se a linguagem for TypeScript, JavaScript, Rust, C, C++, CSS ou JSON. Use a sintaxe de comentário nativa da linguagem (ex: // no TypeScript/Rust).
+4. Para comandos de terminal, use:
 <esperto_cmd>comando aqui</esperto_cmd>
-
-4. Seja direto, forneça código completo e funcional sem comentários preguiçosos (como "// resto do código aqui").`;
+Não inclua comentários '#' antes do comando. Coloque apenas comandos executáveis diretos (ex: npm install, cargo build).
+5. Seja direto e forneça código completo e funcional sem comentários preguiçosos.`;
 
 const defaultSettings: Settings = {
   id: 'default',
@@ -60,7 +86,6 @@ export default function App() {
   const [settings, setSettings] = useState<Settings>(defaultSettings);
   const [elapsedTime, setElapsedTime] = useState(0);
 
-  // Modal de Erro Global com Copiar Log
   const [activeError, setActiveError] = useState<AppErrorInfo | null>(null);
 
   const [isUpdateOpen, setIsUpdateOpen] = useState(false);
@@ -131,8 +156,8 @@ export default function App() {
     const inputTokens = Math.ceil(userChars / 3.8);
     const outputTokens = Math.ceil(modelChars / 3.8);
 
-    const inPrice = modelInfo.inputPrice || 2.50;
-    const outPrice = modelInfo.outputPrice || 10.00;
+    const inPrice = modelInfo.inputPrice || 2.5;
+    const outPrice = modelInfo.outputPrice || 10.0;
 
     return (inputTokens / 1000000) * inPrice + (outputTokens / 1000000) * outPrice;
   }, [messages, inputMessage, systemInstruction, settings.globalMemory, modelInfo]);
@@ -224,14 +249,16 @@ export default function App() {
     }
   };
 
-  const handleBrowseFolder = async () => {
+  const handleBrowseFolder = async (): Promise<string | null> => {
     try {
       const selected = await invoke<string | null>('select_folder');
       if (selected) {
         const updated = Array.from(new Set([...directoryPaths, selected.trim()]));
         setDirectoryPaths(updated);
         syncDirectories(updated);
+        return selected.trim();
       }
+      return null;
     } catch (err: any) {
       setActiveError({
         title: 'Falha ao Selecionar Pasta',
@@ -239,6 +266,7 @@ export default function App() {
         message: 'Não foi possível abrir o seletor de diretórios.',
         technicalDetails: err?.toString() || 'Erro desconhecido ao invocar select_folder',
       });
+      return null;
     }
   };
 
@@ -537,7 +565,7 @@ export default function App() {
         const newTitle = currentInput.slice(0, 26) || currentAttachments[0]?.name || 'Consulta';
         await db.chats.update(activeChatId, { title: newTitle });
         setChats((prev) =>
-          prev.map((c) => (c.id === activeChatId ? { ...c, title: newTitle } : c))
+          prev.map((c) => (c.id === activeChatId ? { ...c, title: newTitle } : c)),
         );
       }
     }
@@ -1038,6 +1066,7 @@ export default function App() {
                 onRetry={msg.role === 'model' && index === messages.length - 1 ? handleRetryLastMessage : undefined}
                 onOpenArtifact={(code, lang) => setActiveArtifact({ code, language: lang })}
                 onFileWritten={() => syncDirectories(directoryPaths)}
+                onRequestSelectFolder={handleBrowseFolder}
               />
             ))
           )}
@@ -1057,7 +1086,6 @@ export default function App() {
 
         <div className="p-4 bg-surface/40 border-t border-purple-950/30">
           <form onSubmit={(e) => { e.preventDefault(); handleSendMessage(); }} className="max-w-4xl mx-auto flex flex-col gap-2">
-
             {attachments.length > 0 && (
               <div className="flex flex-wrap gap-2 p-2 bg-surface/80 rounded-xl border border-purple-900/40">
                 {attachments.map((att, index) => (
@@ -1127,7 +1155,7 @@ export default function App() {
                     <button
                       type="submit"
                       disabled={!inputMessage.trim() && attachments.length === 0}
-                      className="bg-linear-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 disabled:opacity-40 text-white p-2 rounded-xl transition flex items-center justify-center shadow-md shadow-purple-950/50 cursor-pointer"
+                      className="bg-linear-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white p-2 rounded-xl transition flex items-center justify-center shadow-md shadow-purple-950/50 cursor-pointer"
                       title="Enviar mensagem (Enter)"
                     >
                       <Send size={15} />
@@ -1148,10 +1176,7 @@ export default function App() {
         onErrorTrigger={(err) => setActiveError(err)}
       />
 
-      <HelpModal
-        isOpen={isHelpOpen}
-        onClose={() => setIsHelpOpen(false)}
-      />
+      <HelpModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
 
       <UpdateModal
         isOpen={isUpdateOpen}
@@ -1169,7 +1194,6 @@ export default function App() {
         language={activeArtifact?.language || ''}
       />
 
-      {/* Modal de Erro Global com Copiar Log */}
       <ErrorModal
         isOpen={activeError !== null}
         onClose={() => setActiveError(null)}
