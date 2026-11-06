@@ -6,6 +6,7 @@ import { streamOpenAI } from './openai';
 import { streamDeepSeek } from './deepseek';
 import { streamOpenRouter } from './openrouter';
 import { streamOllama } from './ollama';
+import { streamCustomProvider } from './custom';
 
 export interface StreamOptions {
   model: string;
@@ -35,17 +36,41 @@ export async function* streamAIResponse({
   const provider = getProviderByModel(model);
   const relevantHistory = useMemory ? history : [];
 
-  let finalSystemInstruction = systemInstruction || 'Você é o Esperto, um assistente desktop de inteligência artificial de alta performance.';
-  
+  let finalSystemInstruction =
+    systemInstruction || 'Você é o Esperto, um assistente desktop de inteligência artificial de alta performance.';
+
   if (globalMemory && globalMemory.trim()) {
     finalSystemInstruction += `\n\n[MEMÓRIA GLOBAL DO USUÁRIO]:\n${globalMemory.trim()}`;
   }
 
   if (directoryContext && directoryContext.trim()) {
-    finalSystemInstruction += `\n\n[BASE DE CONHECIMENTO DO DIRETÓRIO LOCAL]:\n${directoryContext.trim()}`;
+    finalSystemInstruction += `\n\n[ESTRUTURA E CÓDIGO DO PROJETO LOCAL]:\n${directoryContext.trim()}`;
   }
 
-  // 0. OLLAMA LOCAL (100% Offline / Irrestrito / GPU Máxima)
+  // 1. SERVIDOR PERSONALIZADO (OpenAI Compatible)
+  if (provider === 'custom') {
+    const [, providerId, ...modelParts] = model.split(':');
+    const customProvider = settings.customProviders?.find((item) => item.id === providerId);
+    if (!customProvider) {
+      throw new Error('Servidor personalizado não encontrado. Confira as configurações de modelos.');
+    }
+    const customModel = modelParts.join(':');
+    yield* streamCustomProvider({
+      provider: customProvider,
+      model: customModel,
+      systemInstruction: finalSystemInstruction,
+      history: relevantHistory,
+      newMessage,
+      attachments,
+      temperature: settings.temperature,
+      topP: settings.topP,
+      maxOutputTokens: settings.maxOutputTokens,
+      signal,
+    });
+    return;
+  }
+
+  // 2. OLLAMA LOCAL (GPU Offline)
   if (provider === 'ollama') {
     yield* streamOllama({
       model,
@@ -55,12 +80,13 @@ export async function* streamAIResponse({
       attachments,
       temperature: settings.temperature,
       topP: settings.topP,
+      customHost: settings.ollamaHost,
       signal,
     });
     return;
   }
 
-  // 1. OPENROUTER
+  // 3. OPENROUTER
   if (provider === 'openrouter') {
     if (!settings.openrouterApiKey) {
       throw new Error('Chave de API do OpenRouter não configurada. Abra as Configurações.');
@@ -80,9 +106,9 @@ export async function* streamAIResponse({
     return;
   }
 
-  // 2. GOOGLE GEMINI
+  // 4. GOOGLE GEMINI
   if (provider === 'gemini') {
-    const key = settings.geminiApiKey || (settings as any).apiKey;
+    const key = settings.geminiApiKey;
     if (!key) throw new Error('Chave de API do Gemini não configurada. Abra as Configurações.');
     yield* streamGemini({
       apiKey: key,
@@ -103,7 +129,7 @@ export async function* streamAIResponse({
     return;
   }
 
-  // 3. ANTHROPIC CLAUDE
+  // 5. ANTHROPIC CLAUDE
   if (provider === 'anthropic') {
     if (!settings.anthropicApiKey) throw new Error('Chave de API do Claude não configurada.');
     yield* streamClaude({
@@ -123,7 +149,7 @@ export async function* streamAIResponse({
     return;
   }
 
-  // 4. OPENAI
+  // 6. OPENAI
   if (provider === 'openai') {
     if (!settings.openaiApiKey) throw new Error('Chave de API da OpenAI não configurada.');
     yield* streamOpenAI({
@@ -142,7 +168,7 @@ export async function* streamAIResponse({
     return;
   }
 
-  // 5. DEEPSEEK
+  // 7. DEEPSEEK
   if (provider === 'deepseek') {
     if (!settings.deepseekApiKey) throw new Error('Chave de API da DeepSeek não configurada.');
     yield* streamDeepSeek({

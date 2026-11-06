@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, MessageSquare, Settings as SettingsIcon, Trash2, Copy, Eye, RefreshCw, Pencil, Check, X, HelpCircle } from 'lucide-react';
+import { Plus, MessageSquare, Settings as SettingsIcon, Trash2, Copy, Eye, RefreshCw, Pencil, Check, X, HelpCircle, ExternalLink } from 'lucide-react';
 import { Chat } from '../lib/db';
 import { CURRENT_VERSION } from '../services/updater';
 
@@ -52,7 +52,7 @@ export const Sidebar: React.FC<Props> = ({
           <div className="w-7 h-7 rounded-lg bg-purple-900/50 border border-purple-500/40 flex items-center justify-center text-purple-300">
             <Eye size={16} />
           </div>
-          <span className="font-bold text-sm tracking-wider bg-linear-to-r from-purple-300 to-indigo-200 bg-clip-text text-transparent">
+          <span className="font-bold text-sm tracking-wider bg-linear-to-r from-purple-300 to-indigo-200 bg-clip-text text-transparent font-mono">
             ESPERTO
           </span>
         </div>
@@ -60,7 +60,7 @@ export const Sidebar: React.FC<Props> = ({
         <div className="flex items-center gap-1">
           <button
             onClick={onOpenHelp}
-            title="Central de Ajuda & Chaves"
+            title="Central de Ajuda"
             className="text-gray-500 hover:text-purple-300 transition p-1 cursor-pointer"
           >
             <HelpCircle size={15} />
@@ -78,9 +78,9 @@ export const Sidebar: React.FC<Props> = ({
       <div className="p-3">
         <button
           onClick={onNewChat}
-          className="w-full flex items-center justify-center gap-2 bg-linear-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white font-medium py-2.5 px-4 rounded-xl transition shadow-md shadow-purple-950/50 text-sm cursor-pointer"
+          className="w-full flex items-center justify-center gap-2 bg-linear-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white font-medium py-2 px-4 rounded-xl transition shadow-md shadow-purple-950/50 text-xs cursor-pointer"
         >
-          <Plus size={18} />
+          <Plus size={16} />
           <span>Novo Chat</span>
         </button>
       </div>
@@ -90,7 +90,7 @@ export const Sidebar: React.FC<Props> = ({
           <div
             key={chat.id}
             onClick={() => onSelectChat(chat.id)}
-            className={`flex items-center justify-between p-2.5 rounded-xl transition text-sm group cursor-pointer ${
+            className={`flex items-center justify-between p-2.5 rounded-xl transition text-xs group cursor-pointer ${
               activeChatId === chat.id
                 ? 'bg-surfaceHover text-purple-200 border border-purple-500/20'
                 : 'text-gray-400 hover:bg-surfaceHover/50 hover:text-gray-200'
@@ -116,10 +116,10 @@ export const Sidebar: React.FC<Props> = ({
             ) : (
               <>
                 <div className="flex items-center gap-2.5 truncate">
-                  <MessageSquare size={16} className={activeChatId === chat.id ? 'text-purple-400' : ''} />
+                  <MessageSquare size={15} className={activeChatId === chat.id ? 'text-purple-400' : ''} />
                   <span className="truncate">{chat.title}</span>
                 </div>
-                
+
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
                   <button
                     title="Renomear título"
@@ -152,23 +152,24 @@ export const Sidebar: React.FC<Props> = ({
       <div className="p-3 border-t border-purple-950/30 space-y-2">
         <button
           onClick={onOpenSettings}
-          className="w-full flex items-center gap-2 text-gray-400 hover:text-purple-200 p-2 rounded-xl hover:bg-surfaceHover transition text-sm cursor-pointer"
+          className="w-full flex items-center gap-2 text-gray-400 hover:text-purple-200 p-2 rounded-xl hover:bg-surfaceHover transition text-xs cursor-pointer"
         >
-          <SettingsIcon size={17} />
+          <SettingsIcon size={16} />
           <span>Configurações</span>
         </button>
 
         <div className="px-2 pt-1 flex items-center justify-between text-[10px] text-gray-500 font-mono select-none">
           <button onClick={onCheckUpdate} className="hover:text-purple-300 transition cursor-pointer">
-            Esperto {CURRENT_VERSION} • 2026
+            Esperto {CURRENT_VERSION}
           </button>
           <a
             href="https://www.linkedin.com/in/samuelspineli"
             target="_blank"
             rel="noreferrer"
-            className="text-purple-400/80 hover:text-purple-300 hover:underline transition"
+            className="text-purple-400/80 hover:text-purple-300 hover:underline transition inline-flex items-center gap-0.5"
           >
-            LinkedIn ↗
+            <span>LinkedIn</span>
+            <ExternalLink size={10} />
           </a>
         </div>
       </div>

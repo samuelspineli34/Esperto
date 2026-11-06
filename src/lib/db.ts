@@ -3,7 +3,7 @@ import Dexie, { type Table } from 'dexie';
 export interface Attachment {
   name: string;
   mimeType: string;
-  data: string; // Base64 ou texto
+  data: string;
   size?: number;
   isSnippet?: boolean;
 }
@@ -21,7 +21,7 @@ export interface Chat {
   systemInstruction?: string;
   directoryPaths?: string[];
   useMemory?: boolean;
-  model?: string;
+  model?: string; // Modelo específico para este Chat (Override opcional)
   createdAt: number;
 }
 
@@ -34,16 +34,35 @@ export interface Message {
   timestamp: number;
 }
 
+export interface CustomProviderConfig {
+  id: string;
+  name: string;
+  baseUrl: string;
+  apiKey?: string;
+  protocol: 'openai-compatible';
+  models: string[];
+  enabled?: boolean;
+}
+
 export interface Settings {
   id: string;
-  model: string;
+  model: string; // Modelo padrão global
   globalMemory?: string;
   geminiApiKey?: string;
   openaiApiKey?: string;
   anthropicApiKey?: string;
   deepseekApiKey?: string;
   openrouterApiKey?: string;
-  
+  customProviders?: CustomProviderConfig[];
+
+  // Ollama
+  ollamaCustomPath?: string;
+  ollamaHost?: string; // ex: http://127.0.0.1:11434
+
+  // Segurança do Agente
+  requireActionConfirmation?: boolean; // Pede confirmação antes de gravar no disco ou rodar shell
+
+  // Parâmetros de Inferência
   temperature?: number;
   topP?: number;
   maxOutputTokens?: number;
@@ -61,7 +80,7 @@ export class EspertoDatabase extends Dexie {
 
   constructor() {
     super('EspertoDB');
-    this.version(2).stores({
+    this.version(3).stores({
       chats: 'id, createdAt',
       messages: '++id, chatId, timestamp',
       settings: 'id',
@@ -71,16 +90,3 @@ export class EspertoDatabase extends Dexie {
 }
 
 export const db = new EspertoDatabase();
-
-/**
- * Limpa mensagens antigas ou chats vazios para evitar que o disco C: lote de cache
- */
-export async function clearAppCacheAndOldChats() {
-  try {
-    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000; // Chats com mais de 30 dias sem uso (opcional)
-    // Mantém configurações e predefinições, limpa apenas logs e anexos pesados se necessário
-    console.log('[Esperto] Limpeza de cache executada.');
-  } catch (err) {
-    console.warn('Erro ao limpar cache:', err);
-  }
-}

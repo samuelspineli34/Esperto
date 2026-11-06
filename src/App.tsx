@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { db, Chat, Message, Settings, Attachment, WorkspacePreset } from './lib/db';
 import { streamAIResponse } from './services/ai';
-import { getModelInfo, registerLocalOllamaModels } from './lib/models';
+import { getModelInfo, registerLocalOllamaModels, registerCustomProviderModels } from './lib/models';
 import { getInstalledOllamaModels } from './services/ollama';
 import { Sidebar } from './components/Sidebar';
 import { ChatMessage } from './components/ChatMessage';
@@ -36,11 +36,16 @@ import {
   Gift,
   Cpu,
   FolderSearch,
+  ChevronDown,
+  FileCode2,
+  Wrench,
+  CheckSquare,
+  Terminal,
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 
 const AGENT_SYSTEM_PROMPT = `Você é o ESPERTO, um Engenheiro de Software Autônomo e Agente de Código de Alta Performance.
-Você tem ACESSO DIRETO ao sistema de arquivos do projeto do usuário através da IDE.
+Você tem acesso ao sistema de arquivos do projeto do usuário através da IDE.
 
 REGRAS RÍGIDAS DE GRAVAÇÃO EM DISCO:
 1. Para criar ou alterar arquivos, use SEMPRE a tag:
@@ -52,7 +57,7 @@ conteúdo completo do arquivo
 3. NUNCA inicie o código com '#' como comentário se a linguagem for TypeScript, JavaScript, Rust, C, C++, CSS ou JSON. Use a sintaxe de comentário nativa da linguagem (ex: // no TypeScript/Rust).
 4. Para comandos de terminal, use:
 <esperto_cmd>comando aqui</esperto_cmd>
-Não inclua comentários '#' antes do comando. Coloque apenas comandos executáveis diretos (ex: npm install, cargo build).
+Coloque apenas comandos executáveis diretos (ex: npm install, cargo build, npx vite build).
 5. Seja direto e forneça código completo e funcional sem comentários preguiçosos.`;
 
 const defaultSettings: Settings = {
@@ -64,6 +69,8 @@ const defaultSettings: Settings = {
   thinkingLevel: 'off',
   mediaResolution: 'default',
   googleSearch: false,
+  requireActionConfirmation: true,
+  ollamaHost: 'http://127.0.0.1:11434',
 };
 
 interface LoadedFile {
@@ -87,7 +94,6 @@ export default function App() {
   const [elapsedTime, setElapsedTime] = useState(0);
 
   const [activeError, setActiveError] = useState<AppErrorInfo | null>(null);
-
   const [isUpdateOpen, setIsUpdateOpen] = useState(false);
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [latestRelease, setLatestRelease] = useState<ReleaseInfo | null>(null);
@@ -108,7 +114,17 @@ export default function App() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  const modelInfo = useMemo(() => getModelInfo(settings.model || 'gemini-3.7-flash'), [settings.model]);
+  const currentChat = useMemo(() => chats.find((c) => c.id === activeChatId), [chats, activeChatId]);
+  const activeModelId = useMemo(
+    () => currentChat?.model || settings.model || 'gemini-3.7-flash',
+    [currentChat?.model, settings.model]
+  );
+  const isChatModelOverridden = useMemo(() => Boolean(currentChat?.model), [currentChat?.model]);
+
+  const modelInfo = useMemo(
+    () => getModelInfo(activeModelId, settings.customProviders),
+    [activeModelId, settings.customProviders]
+  );
 
   useEffect(() => {
     let interval: any;
@@ -164,19 +180,23 @@ export default function App() {
 
   useEffect(() => {
     const initLocalModels = async () => {
-      const res = await getInstalledOllamaModels();
+      const res = await getInstalledOllamaModels(settings.ollamaHost, settings.ollamaCustomPath);
       if (res.models && res.models.length > 0) {
         registerLocalOllamaModels(res.models);
       }
     };
     initLocalModels();
-  }, []);
+  }, [settings.ollamaHost, settings.ollamaCustomPath]);
 
   useEffect(() => {
     const loadInitialData = async () => {
       const savedSettings = await db.settings.get('default');
-      if (savedSettings) setSettings(savedSettings);
-      else await db.settings.put(defaultSettings);
+      if (savedSettings) {
+        setSettings(savedSettings);
+        registerCustomProviderModels(savedSettings.customProviders || []);
+      } else {
+        await db.settings.put(defaultSettings);
+      }
 
       const allPresets = await db.presets.orderBy('createdAt').reverse().toArray();
       setPresets(allPresets);
@@ -190,6 +210,32 @@ export default function App() {
     loadInitialData();
   }, []);
 
+  const syncDirectories = useCallback(
+    async (paths: string[]) => {
+      const validPaths = paths.filter((p) => p.trim().length > 0);
+      if (validPaths.length === 0) {
+        setAllLoadedFiles([]);
+        return;
+      }
+
+      setLoadingDirectories(true);
+      try {
+        const files = await invoke<LoadedFile[]>('read_multiple_directories', {
+          dirPaths: validPaths,
+        });
+        setAllLoadedFiles(files);
+        if (activeChatId) {
+          await db.chats.update(activeChatId, { directoryPaths: validPaths });
+        }
+      } catch (err: any) {
+        console.warn('Erro ao ler pastas:', err);
+      } finally {
+        setLoadingDirectories(false);
+      }
+    },
+    [activeChatId]
+  );
+
   useEffect(() => {
     if (!activeChatId) {
       setMessages([]);
@@ -199,25 +245,22 @@ export default function App() {
     }
 
     const loadChatData = async () => {
-      const activeChat = await db.chats.get(activeChatId);
-      if (activeChat) {
-        setSystemInstruction(activeChat.systemInstruction || '');
-        setUseMemory(activeChat.useMemory !== false);
-        const paths = activeChat.directoryPaths || [];
+      const active = await db.chats.get(activeChatId);
+      if (active) {
+        setSystemInstruction(active.systemInstruction || '');
+        setUseMemory(active.useMemory !== false);
+        const paths = active.directoryPaths || [];
         setDirectoryPaths(paths);
         if (paths.length > 0) syncDirectories(paths);
         else setAllLoadedFiles([]);
       }
 
-      const chatMessages = await db.messages
-        .where('chatId')
-        .equals(activeChatId)
-        .sortBy('timestamp');
+      const chatMessages = await db.messages.where('chatId').equals(activeChatId).sortBy('timestamp');
       setMessages(chatMessages);
     };
 
     loadChatData();
-  }, [activeChatId]);
+  }, [activeChatId, syncDirectories]);
 
   useEffect(() => {
     chatContainerRef.current?.scrollTo({
@@ -225,29 +268,6 @@ export default function App() {
       behavior: isLoading ? 'auto' : 'smooth',
     });
   }, [messages, isLoading]);
-
-  const syncDirectories = async (paths: string[]) => {
-    const validPaths = paths.filter((p) => p.trim().length > 0);
-    if (validPaths.length === 0) {
-      setAllLoadedFiles([]);
-      return;
-    }
-
-    setLoadingDirectories(true);
-    try {
-      const files = await invoke<LoadedFile[]>('read_multiple_directories', {
-        dirPaths: validPaths,
-      });
-      setAllLoadedFiles(files);
-      if (activeChatId) {
-        await db.chats.update(activeChatId, { directoryPaths: validPaths });
-      }
-    } catch (err: any) {
-      console.warn('Erro ao ler pastas:', err);
-    } finally {
-      setLoadingDirectories(false);
-    }
-  };
 
   const handleBrowseFolder = async (): Promise<string | null> => {
     try {
@@ -262,9 +282,9 @@ export default function App() {
     } catch (err: any) {
       setActiveError({
         title: 'Falha ao Selecionar Pasta',
-        context: 'Seletor Nativo do Windows',
+        context: 'Seletor Nativo do Sistema',
         message: 'Não foi possível abrir o seletor de diretórios.',
-        technicalDetails: err?.toString() || 'Erro desconhecido ao invocar select_folder',
+        technicalDetails: err?.toString() || 'Erro ao invocar select_folder',
       });
       return null;
     }
@@ -328,7 +348,11 @@ export default function App() {
       const lowerPath = f.path.toLowerCase();
       const lowerContent = f.content.toLowerCase();
 
-      if (lowerPath.endsWith('package.json') || lowerPath.endsWith('cargo.toml') || lowerPath.endsWith('readme.md')) {
+      if (
+        lowerPath.endsWith('package.json') ||
+        lowerPath.endsWith('cargo.toml') ||
+        lowerPath.endsWith('readme.md')
+      ) {
         score += 3;
       }
 
@@ -343,7 +367,7 @@ export default function App() {
 
     scoredFiles.sort((a, b) => b.score - a.score);
 
-    const MAX_CHARS_BUDGET = 40000;
+    const MAX_CHARS_BUDGET = 45000;
     let accumulatedChars = manifest.length;
     let includedCount = 0;
     let filesContent = '';
@@ -394,15 +418,13 @@ export default function App() {
       systemInstruction: sourceChat.systemInstruction || '',
       directoryPaths: sourceChat.directoryPaths || [],
       useMemory: sourceChat.useMemory !== false,
+      model: sourceChat.model,
       createdAt: Date.now(),
     };
 
     await db.chats.add(newChat);
 
-    const sourceMessages = await db.messages
-      .where('chatId')
-      .equals(sourceChatId)
-      .sortBy('timestamp');
+    const sourceMessages = await db.messages.where('chatId').equals(sourceChatId).sortBy('timestamp');
 
     for (const msg of sourceMessages) {
       await db.messages.add({
@@ -565,7 +587,7 @@ export default function App() {
         const newTitle = currentInput.slice(0, 26) || currentAttachments[0]?.name || 'Consulta';
         await db.chats.update(activeChatId, { title: newTitle });
         setChats((prev) =>
-          prev.map((c) => (c.id === activeChatId ? { ...c, title: newTitle } : c)),
+          prev.map((c) => (c.id === activeChatId ? { ...c, title: newTitle } : c))
         );
       }
     }
@@ -583,7 +605,7 @@ export default function App() {
 
     try {
       const generator = streamAIResponse({
-        model: settings.model || 'gemini-3.7-flash',
+        model: activeModelId,
         settings,
         systemInstruction: combinedSystemPrompt,
         globalMemory: settings.globalMemory,
@@ -636,8 +658,8 @@ export default function App() {
 
         setActiveError({
           title: 'Erro na Geração da Resposta',
-          context: `Modelo: ${settings.model || 'desconhecido'}`,
-          message: err.message || 'Não foi possível completar o streaming da resposta.',
+          context: `Modelo: ${activeModelId}`,
+          message: err.message || 'Não foi possível completar a transmissão da resposta.',
           technicalDetails: err.stack || err.toString(),
         });
       }
@@ -678,7 +700,7 @@ export default function App() {
     md += `*Exportado em: ${new Date().toLocaleString('pt-BR')} via Esperto Desktop*\n\n---\n\n`;
 
     messages.forEach((m) => {
-      const author = m.role === 'user' ? '👤 Usuário' : '🧠 Esperto';
+      const author = m.role === 'user' ? 'Usuário' : 'Esperto';
       md += `### ${author}\n\n${m.content}\n\n---\n\n`;
     });
 
@@ -693,6 +715,7 @@ export default function App() {
 
   const handleSaveSettings = async (newSettings: Settings) => {
     setSettings(newSettings);
+    registerCustomProviderModels(newSettings.customProviders || []);
     await db.settings.put(newSettings);
   };
 
@@ -726,68 +749,76 @@ export default function App() {
         >
           <div className="flex items-center gap-3">
             <Eye size={18} className="text-purple-400 animate-pulse" />
-            <span className="font-bold text-xs tracking-widest bg-linear-to-r from-purple-400 to-indigo-300 bg-clip-text text-transparent uppercase">
+            <span className="font-bold text-xs tracking-widest bg-linear-to-r from-purple-400 to-indigo-300 bg-clip-text text-transparent uppercase font-mono">
               ESPERTO
             </span>
 
-            <button
-              onClick={() => setIsSettingsOpen(true)}
-              className="text-[10px] font-semibold bg-purple-950/80 hover:bg-purple-900/80 text-purple-300 px-2.5 py-0.5 rounded-full border border-purple-800/40 transition cursor-pointer flex items-center gap-1.5"
-            >
-              {modelInfo.isLocal && <Cpu size={11} className="text-emerald-400 animate-pulse" />}
-              <span>{settings.model || 'gemini-3.7-flash'}</span>
-              {modelInfo.isLocal ? (
-                <span className="bg-emerald-950 text-emerald-300 text-[9px] px-1.5 py-0.2 rounded font-bold border border-emerald-500/50">LOCAL</span>
-              ) : modelInfo.pricing === 'free_tier' ? (
-                <span className="bg-emerald-950 text-emerald-300 text-[9px] px-1 py-0.2 rounded font-bold border border-emerald-800/50">GRÁTIS</span>
-              ) : (
-                <span className="bg-amber-950 text-amber-300 text-[9px] px-1 py-0.2 rounded font-bold border border-amber-800/50">PAGO</span>
-              )}
-            </button>
+            <div className="relative group">
+              <button
+                onClick={() => setIsSettingsOpen(true)}
+                className="text-[11px] font-medium bg-surface hover:bg-surfaceHover text-purple-200 px-3 py-1 rounded-lg border border-purple-900/40 transition cursor-pointer flex items-center gap-2 shadow-sm"
+              >
+                {modelInfo.isLocal && <Cpu size={12} className="text-emerald-400 animate-pulse" />}
+                <span className="truncate max-w-36 font-semibold">{modelInfo.name}</span>
+
+                {isChatModelOverridden ? (
+                  <span className="bg-purple-950 text-purple-300 text-[9px] px-1.5 py-0.5 rounded font-mono font-semibold border border-purple-800/40">
+                    CHAT
+                  </span>
+                ) : (
+                  <span className="bg-background text-gray-400 text-[9px] px-1.5 py-0.5 rounded font-mono border border-purple-900/30">
+                    GLOBAL
+                  </span>
+                )}
+                <ChevronDown size={12} className="text-gray-400" />
+              </button>
+            </div>
 
             <div
               title={`Contexto: ${totalEstimatedTokens.toLocaleString()} de ${(modelInfo.contextLimit / 1000).toFixed(0)}k tokens`}
-              className="hidden md:flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-surface border border-purple-900/30 text-[10px] font-mono text-purple-300"
+              className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-surface border border-purple-900/30 text-[10px] font-mono text-purple-300"
             >
-              <Activity size={11} className={tokenUsagePercent > 80 ? 'text-red-400' : 'text-purple-400'} />
+              <Activity size={12} className={tokenUsagePercent > 80 ? 'text-red-400' : 'text-purple-400'} />
               <span>{totalEstimatedTokens > 1000 ? `${(totalEstimatedTokens / 1000).toFixed(1)}k` : totalEstimatedTokens}</span>
-              <span className="text-gray-500">/</span>
-              <span className="text-gray-400">{modelInfo.contextLimit >= 1000000 ? '1.0M' : `${modelInfo.contextLimit / 1000}k`}</span>
+              <span className="text-gray-600">/</span>
+              <span className="text-gray-400">
+                {modelInfo.contextLimit >= 1000000 ? '1.0M' : `${modelInfo.contextLimit / 1000}k`}
+              </span>
               <span className="font-bold ml-0.5">({tokenUsagePercent}%)</span>
             </div>
 
             {modelInfo.isLocal ? (
               <div
-                title="Executando 100% offline na sua placa de vídeo via Ollama sem consumo de cota ou faturamento."
-                className="hidden lg:flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-surface border border-emerald-900/40 text-[10px] font-mono text-emerald-300 shadow-sm"
+                title="Executando offline localmente na GPU."
+                className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-surface border border-emerald-900/40 text-[10px] font-mono text-emerald-300 shadow-sm"
               >
-                <Cpu size={11} className="text-emerald-400" />
-                <span>Custo: $0.00 (GPU Local)</span>
+                <Cpu size={12} className="text-emerald-400" />
+                <span>GPU Local</span>
               </div>
             ) : modelInfo.pricing === 'paid_only' ? (
               <div
-                title={`Custo estimado da conversa atual (${modelInfo.name}): ~$${modelInfo.inputPrice}/1M entrada, ~$${modelInfo.outputPrice}/1M saída`}
-                className="hidden lg:flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-surface border border-amber-900/40 text-[10px] font-mono text-amber-300 shadow-sm"
+                title={`Custo estimado da conversa atual (${modelInfo.name})`}
+                className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-surface border border-amber-900/40 text-[10px] font-mono text-amber-300 shadow-sm"
               >
-                <DollarSign size={11} className="text-amber-400" />
-                <span>Custo est.:</span>
+                <DollarSign size={12} className="text-amber-400" />
+                <span>Custo:</span>
                 <span className="font-bold text-amber-200">
                   {estimatedCostUSD < 0.0001 ? '<$0.0001' : `$${estimatedCostUSD.toFixed(4)}`}
                 </span>
               </div>
             ) : (
               <div
-                title="Este modelo está operando em Cota Gratuita (Custo zero)."
-                className="hidden lg:flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-surface border border-emerald-900/30 text-[10px] font-mono text-emerald-300 shadow-sm"
+                title="Cota Gratuita."
+                className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-surface border border-emerald-900/30 text-[10px] font-mono text-emerald-300 shadow-sm"
               >
-                <Gift size={11} className="text-emerald-400" />
-                <span>Custo: $0.00 (Grátis)</span>
+                <Gift size={12} className="text-emerald-400" />
+                <span>Cota Gratuita</span>
               </div>
             )}
 
             {isLoading && (
-              <div className="flex items-center gap-1 text-[11px] font-mono text-purple-300 bg-purple-950/70 border border-purple-500/40 px-2 py-0.5 rounded-full animate-pulse">
-                <Timer size={11} />
+              <div className="flex items-center gap-1 text-[11px] font-mono text-purple-300 bg-purple-950/70 border border-purple-500/40 px-2.5 py-1 rounded-lg animate-pulse">
+                <Timer size={12} />
                 <span>{elapsedTime.toFixed(1)}s</span>
               </div>
             )}
@@ -804,7 +835,7 @@ export default function App() {
               }`}
             >
               <Brain size={14} className={useMemory ? 'text-purple-400' : ''} />
-              <span>{useMemory ? 'Memória: ON' : 'Memória: OFF'}</span>
+              <span>{useMemory ? 'Memória: Ativa' : 'Memória: Inativa'}</span>
             </button>
 
             {activeChatId && (
@@ -837,10 +868,18 @@ export default function App() {
                   ? 'bg-purple-950/80 text-purple-300 border-purple-500/50 shadow-sm'
                   : 'text-gray-400 hover:text-white bg-surface border-purple-950/30'
               }`}
-              title="Vincular pastas locais ou projetos salvos"
+              title="Vincular pastas locais de código"
             >
-              {directoryPaths.length > 0 ? <FolderCheck size={14} className="text-purple-400" /> : <Folder size={14} />}
-              <span>{directoryPaths.length > 0 ? `${directoryPaths.length} Pastas (${allLoadedFiles.length} arqs)` : 'Pastas Base'}</span>
+              {directoryPaths.length > 0 ? (
+                <FolderCheck size={14} className="text-purple-400" />
+              ) : (
+                <Folder size={14} />
+              )}
+              <span>
+                {directoryPaths.length > 0
+                  ? `${directoryPaths.length} Pastas (${allLoadedFiles.length} arqs)`
+                  : 'Pastas Base'}
+              </span>
             </button>
 
             {messages.length > 0 && (
@@ -862,7 +901,7 @@ export default function App() {
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-bold text-purple-200 flex items-center gap-1.5">
                   <Bookmark size={14} className="text-purple-400" />
-                  <span>Projetos Salvos (Workspaces com 1 Clique)</span>
+                  <span>Projetos Salvos (Workspaces em 1 Clique)</span>
                 </span>
 
                 <button
@@ -895,11 +934,15 @@ export default function App() {
               )}
 
               {presets.length === 0 ? (
-                <p className="text-[11px] text-gray-500">Nenhum projeto salvo ainda. Adicione pastas abaixo e clique em salvar para criar seu primeiro projeto.</p>
+                <p className="text-[11px] text-gray-500">
+                  Nenhum projeto salvo. Adicione pastas abaixo para salvar seu primeiro workspace.
+                </p>
               ) : (
                 <div className="flex flex-wrap gap-2">
                   {presets.map((preset) => {
-                    const isFullyLoaded = preset.paths.every((p) => directoryPaths.includes(p)) && preset.paths.length === directoryPaths.length;
+                    const isFullyLoaded =
+                      preset.paths.every((p) => directoryPaths.includes(p)) &&
+                      preset.paths.length === directoryPaths.length;
                     return (
                       <div
                         key={preset.id}
@@ -911,7 +954,9 @@ export default function App() {
                         }`}
                       >
                         <span className="font-semibold">{preset.name}</span>
-                        <span className="text-[10px] text-purple-400 font-mono">({preset.paths.length} pastas)</span>
+                        <span className="text-[10px] text-purple-400 font-mono">
+                          ({preset.paths.length} pastas)
+                        </span>
                         <button
                           onClick={(e) => handleDeletePreset(preset.id, e)}
                           className="text-gray-500 hover:text-red-400 transition p-0.5 opacity-0 group-hover:opacity-100"
@@ -939,7 +984,10 @@ export default function App() {
               {directoryPaths.length > 0 && (
                 <div className="space-y-1 max-h-28 overflow-y-auto">
                   {directoryPaths.map((path, idx) => (
-                    <div key={idx} className="flex items-center justify-between bg-background border border-purple-900/30 px-3 py-1 rounded-xl text-xs text-purple-200 font-mono">
+                    <div
+                      key={idx}
+                      className="flex items-center justify-between bg-background border border-purple-900/30 px-3 py-1 rounded-xl text-xs text-purple-200 font-mono"
+                    >
                       <span className="truncate flex-1 mr-2">{path}</span>
                       <button
                         onClick={() => handleRemoveDirectory(path)}
@@ -957,7 +1005,7 @@ export default function App() {
                 <button
                   onClick={handleBrowseFolder}
                   className="bg-purple-950/80 hover:bg-purple-900 border border-purple-500/40 text-purple-300 hover:text-white px-3 py-1.5 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer shadow-sm"
-                  title="Abrir o explorador do Windows para escolher a pasta"
+                  title="Abrir o explorador de arquivos"
                 >
                   <FolderSearch size={14} className="text-purple-400" />
                   <span>Procurar Pasta</span>
@@ -968,7 +1016,7 @@ export default function App() {
                   value={newDirPath}
                   onChange={(e) => setNewDirPath(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleAddDirectory()}
-                  placeholder="Ou cole o caminho de uma pasta..."
+                  placeholder="Ou cole o caminho da pasta..."
                   className="flex-1 bg-background border border-purple-900/40 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-purple-500 font-mono"
                 />
                 <button
@@ -1013,44 +1061,78 @@ export default function App() {
               <div className="w-16 h-16 rounded-2xl bg-purple-950/30 border border-purple-500/20 flex items-center justify-center mb-4 shadow-xl shadow-purple-950/30">
                 <Eye size={36} className="text-purple-400 animate-pulse" />
               </div>
-              <h2 className="text-base font-bold text-white mb-1">Esperto • Agente Autônomo Local</h2>
-              <p className="text-xs text-gray-500 mb-6 text-center">Peça para o Esperto criar, editar e refatorar os arquivos do seu projeto diretamente no disco.</p>
+              <h2 className="text-base font-bold text-white mb-1">Esperto • Engenheiro de Software Autônomo</h2>
+              <p className="text-xs text-gray-400 mb-6 text-center">
+                Crie, inspecione e refatore código diretamente no disco através de ações nativas.
+              </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full">
                 <button
                   type="button"
-                  onClick={() => handleSendMessage('Crie um script utilitário em TypeScript na pasta src/lib chamado formatters.ts com funções úteis.')}
+                  onClick={() =>
+                    handleSendMessage(
+                      'Crie um script utilitário em TypeScript na pasta src/lib chamado formatters.ts com funções úteis.'
+                    )
+                  }
                   className="p-3 bg-surface/50 hover:bg-surface border border-purple-900/30 hover:border-purple-500/50 rounded-xl text-left transition cursor-pointer group"
                 >
-                  <span className="text-xs font-semibold text-purple-200 group-hover:text-white block">⚡ Criar Arquivo no Projeto</span>
-                  <span className="text-[11px] text-gray-500">O Agente gera e você salva no HD em 1 clique.</span>
+                  <div className="flex items-center gap-2 mb-1">
+                    <FileCode2 size={15} className="text-purple-400" />
+                    <span className="text-xs font-semibold text-purple-200 group-hover:text-white">
+                      Criar Arquivo no Projeto
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-gray-500">O Agente gera o código e grava diretamente no disco.</span>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => handleSendMessage('Analise os arquivos do projeto e refatore a estrutura para melhorar a performance.')}
+                  onClick={() =>
+                    handleSendMessage(
+                      'Analise os arquivos do projeto e refatore a estrutura para melhorar a performance.'
+                    )
+                  }
                   className="p-3 bg-surface/50 hover:bg-surface border border-purple-900/30 hover:border-purple-500/50 rounded-xl text-left transition cursor-pointer group"
                 >
-                  <span className="text-xs font-semibold text-purple-200 group-hover:text-white block">🛠 Refatorar Código Existente</span>
-                  <span className="text-[11px] text-gray-500">Gera as modificações prontas para aplicar.</span>
+                  <div className="flex items-center gap-2 mb-1">
+                    <Wrench size={15} className="text-purple-400" />
+                    <span className="text-xs font-semibold text-purple-200 group-hover:text-white">
+                      Refatorar Código Existente
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-gray-500">Identifica melhorias e gera modificações prontas.</span>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => handleSendMessage('Crie um teste unitário completo para a lógica principal do app.')}
+                  onClick={() =>
+                    handleSendMessage('Crie um teste unitário completo para a lógica principal do app.')
+                  }
                   className="p-3 bg-surface/50 hover:bg-surface border border-purple-900/30 hover:border-purple-500/50 rounded-xl text-left transition cursor-pointer group"
                 >
-                  <span className="text-xs font-semibold text-purple-200 group-hover:text-white block">🧪 Gerar Testes Automatizados</span>
-                  <span className="text-[11px] text-gray-500">Cria os arquivos de teste direto na estrutura.</span>
+                  <div className="flex items-center gap-2 mb-1">
+                    <CheckSquare size={15} className="text-purple-400" />
+                    <span className="text-xs font-semibold text-purple-200 group-hover:text-white">
+                      Gerar Testes Automatizados
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-gray-500">Cria arquivos de teste na estrutura do workspace.</span>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => handleSendMessage('Como posso compilar e verificar erros deste projeto via terminal?')}
+                  onClick={() =>
+                    handleSendMessage('Como posso compilar e verificar erros deste projeto via terminal?')
+                  }
                   className="p-3 bg-surface/50 hover:bg-surface border border-purple-900/30 hover:border-purple-500/50 rounded-xl text-left transition cursor-pointer group"
                 >
-                  <span className="text-xs font-semibold text-purple-200 group-hover:text-white block">💻 Executar Comandos no Terminal</span>
-                  <span className="text-[11px] text-gray-500">Roda builds e comandos direto pela IDE.</span>
+                  <div className="flex items-center gap-2 mb-1">
+                    <Terminal size={15} className="text-purple-400" />
+                    <span className="text-xs font-semibold text-purple-200 group-hover:text-white">
+                      Executar Comandos de Terminal
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-gray-500">Executa builds, testes e comandos do ambiente.</span>
                 </button>
               </div>
             </div>
@@ -1062,6 +1144,7 @@ export default function App() {
                 content={msg.content}
                 attachments={msg.attachments}
                 baseDirectories={directoryPaths}
+                requireConfirmation={settings.requireActionConfirmation !== false}
                 onEdit={msg.role === 'user' ? (newText) => handleEditMessage(index, newText) : undefined}
                 onRetry={msg.role === 'model' && index === messages.length - 1 ? handleRetryLastMessage : undefined}
                 onOpenArtifact={(code, lang) => setActiveArtifact({ code, language: lang })}
@@ -1077,7 +1160,7 @@ export default function App() {
                 <Eye size={18} className="text-purple-400" />
               </div>
               <div className="flex items-center gap-2 text-xs font-mono">
-                <span className="animate-pulse">Esperto analisando e gerando ações...</span>
+                <span className="animate-pulse">Processando resposta e ações...</span>
                 <span className="text-purple-400 font-bold">({elapsedTime.toFixed(1)}s)</span>
               </div>
             </div>
@@ -1085,11 +1168,20 @@ export default function App() {
         </div>
 
         <div className="p-4 bg-surface/40 border-t border-purple-950/30">
-          <form onSubmit={(e) => { e.preventDefault(); handleSendMessage(); }} className="max-w-4xl mx-auto flex flex-col gap-2">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSendMessage();
+            }}
+            className="max-w-4xl mx-auto flex flex-col gap-2"
+          >
             {attachments.length > 0 && (
               <div className="flex flex-wrap gap-2 p-2 bg-surface/80 rounded-xl border border-purple-900/40">
                 {attachments.map((att, index) => (
-                  <div key={index} className="flex items-center gap-1.5 bg-background border border-purple-800/40 px-2.5 py-1 rounded-lg text-xs text-purple-200 shadow-sm">
+                  <div
+                    key={index}
+                    className="flex items-center gap-1.5 bg-background border border-purple-800/40 px-2.5 py-1 rounded-lg text-xs text-purple-200 shadow-sm"
+                  >
                     {att.mimeType.startsWith('image/') ? (
                       <ImageIcon size={13} className="text-purple-400" />
                     ) : (
@@ -1109,13 +1201,7 @@ export default function App() {
             )}
 
             <div className="bg-surface border border-purple-900/40 focus-within:border-purple-500 rounded-2xl p-3 transition shadow-inner flex flex-col gap-2">
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handleFileInput}
-                multiple
-                className="hidden"
-              />
+              <input type="file" ref={fileInputRef} onChange={handleFileInput} multiple className="hidden" />
 
               <textarea
                 ref={textareaRef}
@@ -1124,7 +1210,7 @@ export default function App() {
                 onChange={(e) => setInputMessage(e.target.value)}
                 onKeyDown={handleKeyDown}
                 onPaste={handlePaste}
-                placeholder="Peça para o Agente criar ou alterar arquivos no projeto... (Enter para enviar)"
+                placeholder="Solicite alterações ou comandos de código... (Enter para enviar)"
                 className="w-full bg-transparent px-1 pt-1 text-sm text-white placeholder-gray-500 focus:outline-none resize-y min-h-17.5 max-h-96 leading-relaxed font-sans"
               />
 
@@ -1146,7 +1232,7 @@ export default function App() {
                       type="button"
                       onClick={handleStopGeneration}
                       className="bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/40 px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer text-xs font-semibold"
-                      title="Parar resposta"
+                      title="Interromper geração"
                     >
                       <Square size={13} fill="currentColor" />
                       <span>Parar</span>
@@ -1155,7 +1241,7 @@ export default function App() {
                     <button
                       type="submit"
                       disabled={!inputMessage.trim() && attachments.length === 0}
-                      className="bg-linear-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white p-2 rounded-xl transition flex items-center justify-center shadow-md shadow-purple-950/50 cursor-pointer"
+                      className="bg-linear-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white p-2 rounded-xl transition flex items-center justify-center shadow-md shadow-purple-950/50 cursor-pointer disabled:opacity-40"
                       title="Enviar mensagem (Enter)"
                     >
                       <Send size={15} />
@@ -1194,11 +1280,7 @@ export default function App() {
         language={activeArtifact?.language || ''}
       />
 
-      <ErrorModal
-        isOpen={activeError !== null}
-        onClose={() => setActiveError(null)}
-        errorInfo={activeError}
-      />
+      <ErrorModal isOpen={activeError !== null} onClose={() => setActiveError(null)} errorInfo={activeError} />
     </div>
   );
 }

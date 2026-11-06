@@ -2,13 +2,20 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpStream;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct FileContext {
     pub path: String,
     pub content: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct CommandResult {
+    pub output: String,
+    pub exit_code: i32,
+    pub success: bool,
 }
 
 fn should_ignore(path_str: &str) -> bool {
@@ -58,7 +65,8 @@ fn collect_files(base_path: &Path, current_path: &Path, results: &mut Vec<FileCo
                     }
                 }
                 if let Ok(content) = fs::read_to_string(&path) {
-                    let rel_path = path.strip_prefix(base_path)
+                    let rel_path = path
+                        .strip_prefix(base_path)
                         .unwrap_or(&path)
                         .to_string_lossy()
                         .to_string();
@@ -82,22 +90,62 @@ fn read_multiple_directories(dir_paths: Vec<String>) -> Result<Vec<FileContext>,
         }
         let path = Path::new(clean);
         if path.exists() && path.is_dir() {
-            collect_files(path, path, &mut all_files, 300);
+            collect_files(path, path, &mut all_files, 400);
         }
     }
     Ok(all_files)
 }
 
+fn parse_host_port(host_str: Option<String>) -> (String, u16) {
+    let raw = host_str.unwrap_or_else(|| "127.0.0.1:11434".to_string());
+    let clean = raw.trim().replace("http://", "").replace("https://", "");
+    let parts: Vec<&str> = clean.split(':').collect();
+    let host = parts.first().unwrap_or(&"127.0.0.1").to_string();
+    let port: u16 = parts.get(1).and_then(|p| p.parse().ok()).unwrap_or(11434);
+    (host, port)
+}
+
 #[tauri::command]
-fn start_ollama_service() -> Result<String, String> {
-    let addr = "127.0.0.1:11434";
-    let socket_addr = addr.parse().map_err(|e| format!("Endereço local inválido: {}", e))?;
+fn check_ollama_status(custom_host: Option<String>) -> Result<bool, String> {
+    let (host, port) = parse_host_port(custom_host);
+    let socket_str = format!("{}:{}", host, port);
+    let socket_addr = socket_str.parse().map_err(|e| format!("Endereço inválido: {}", e))?;
+    Ok(TcpStream::connect_timeout(&socket_addr, Duration::from_millis(500)).is_ok())
+}
+
+#[tauri::command]
+fn start_ollama_service(custom_path: Option<String>, custom_host: Option<String>) -> Result<String, String> {
+    let (host, port) = parse_host_port(custom_host);
+    let socket_str = format!("{}:{}", host, port);
+    let socket_addr = socket_str.parse().map_err(|e| format!("Endereço inválido: {}", e))?;
 
     if TcpStream::connect_timeout(&socket_addr, Duration::from_millis(400)).is_ok() {
         return Ok("Ollama já está ativo em segundo plano.".to_string());
     }
 
-    let mut cmd = std::process::Command::new("ollama");
+    let mut exec_path = "ollama".to_string();
+
+    if let Some(p) = custom_path {
+        let trimmed = p.trim().replace("\"", "").replace("'", "");
+        if !trimmed.is_empty() && Path::new(&trimmed).exists() {
+            exec_path = trimmed;
+        }
+    } else {
+        #[cfg(target_os = "windows")]
+        {
+            if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+                let default_win_path = PathBuf::from(&local_app_data)
+                    .join("Programs")
+                    .join("Ollama")
+                    .join("ollama.exe");
+                if default_win_path.exists() {
+                    exec_path = default_win_path.to_string_lossy().to_string();
+                }
+            }
+        }
+    }
+
+    let mut cmd = std::process::Command::new(&exec_path);
     cmd.arg("serve");
 
     #[cfg(target_os = "windows")]
@@ -107,9 +155,10 @@ fn start_ollama_service() -> Result<String, String> {
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
 
-    cmd.spawn().map_err(|e| format!("Falha ao disparar o executável do Ollama: {}", e))?;
+    cmd.spawn()
+        .map_err(|e| format!("Falha ao iniciar o executável do Ollama ('{}'): {}", exec_path, e))?;
 
-    for _ in 0..8 {
+    for _ in 0..10 {
         std::thread::sleep(Duration::from_millis(500));
         if TcpStream::connect_timeout(&socket_addr, Duration::from_millis(400)).is_ok() {
             return Ok("Ollama iniciado com sucesso em segundo plano!".to_string());
@@ -120,16 +169,20 @@ fn start_ollama_service() -> Result<String, String> {
 }
 
 #[tauri::command]
-fn fetch_ollama_tags() -> Result<String, String> {
-    let addr = "127.0.0.1:11434";
-    let socket_addr = addr.parse().map_err(|e| format!("Endereço local inválido: {}", e))?;
+fn fetch_ollama_tags(custom_host: Option<String>) -> Result<String, String> {
+    let (host, port) = parse_host_port(custom_host);
+    let socket_str = format!("{}:{}", host, port);
+    let socket_addr = socket_str.parse().map_err(|e| format!("Endereço inválido: {}", e))?;
 
     let mut stream = TcpStream::connect_timeout(&socket_addr, Duration::from_millis(2500))
-        .map_err(|e| format!("Não foi possível conectar ao Ollama em {}: {}", addr, e))?;
+        .map_err(|e| format!("Não foi possível conectar ao Ollama em {}: {}", socket_str, e))?;
 
     stream.set_read_timeout(Some(Duration::from_millis(4000))).map_err(|e| e.to_string())?;
 
-    let request = format!("GET /api/tags HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nAccept: application/json\r\n\r\n", addr);
+    let request = format!(
+        "GET /api/tags HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nAccept: application/json\r\n\r\n",
+        socket_str
+    );
     stream.write_all(request.as_bytes()).map_err(|e| format!("Erro ao enviar requisição ao Ollama: {}", e))?;
 
     let mut response = Vec::new();
@@ -196,14 +249,17 @@ fn write_file(path: String, content: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn execute_terminal_command(command: String, cwd: Option<String>) -> Result<String, String> {
+fn execute_terminal_command(command: String, cwd: Option<String>) -> Result<CommandResult, String> {
     let clean_cmd = command.trim();
     if clean_cmd.is_empty() {
-        return Ok("Nenhum comando para executar.".to_string());
+        return Ok(CommandResult {
+            output: "Nenhum comando para executar.".to_string(),
+            exit_code: 0,
+            success: true,
+        });
     }
 
     let mut cmd = if cfg!(target_os = "windows") {
-        // Usa PowerShell no Windows para suporte nativo a comentários (#), npm, npx e scripts
         let mut c = std::process::Command::new("powershell");
         c.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", clean_cmd]);
         c
@@ -223,9 +279,15 @@ fn execute_terminal_command(command: String, cwd: Option<String>) -> Result<Stri
     let output = cmd.output().map_err(|e| format!("Falha ao executar comando: {}", e))?;
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let exit_code = output.status.code().unwrap_or(-1);
 
     let combined = format!("{}\n{}", stdout, stderr).trim().to_string();
-    Ok(combined)
+
+    Ok(CommandResult {
+        output: combined,
+        exit_code,
+        success: output.status.success(),
+    })
 }
 
 #[tauri::command]
@@ -252,6 +314,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             open_url,
             read_multiple_directories,
+            check_ollama_status,
             start_ollama_service,
             fetch_ollama_tags,
             select_folder,

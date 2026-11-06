@@ -22,34 +22,55 @@ interface StreamOptions {
   temperature?: number;
   topP?: number;
   contextLength?: number;
+  customHost?: string;
   signal?: AbortSignal;
 }
 
-const OLLAMA_HOST = 'http://127.0.0.1:11434';
+export const DEFAULT_OLLAMA_HOST = 'http://127.0.0.1:11434';
 
-// Detecta se o modelo tem visão (capacidade multimodal)
 function isVisionModel(modelName: string): boolean {
   const lower = modelName.toLowerCase();
-  return lower.includes('vl') || lower.includes('vision') || lower.includes('llava') || lower.includes('moondream') || lower.includes('minicpm');
+  return (
+    lower.includes('vl') ||
+    lower.includes('vision') ||
+    lower.includes('llava') ||
+    lower.includes('moondream') ||
+    lower.includes('minicpm')
+  );
 }
 
-export async function getInstalledOllamaModels(): Promise<{ models: OllamaModelTag[]; error?: string }> {
+export async function checkOllamaRunning(customHost?: string): Promise<boolean> {
   try {
-    const rawJson = await invoke<string>('fetch_ollama_tags');
+    return await invoke<boolean>('check_ollama_status', { customHost });
+  } catch {
+    return false;
+  }
+}
+
+export async function startOllama(customPath?: string, customHost?: string): Promise<string> {
+  return await invoke<string>('start_ollama_service', { customPath, customHost });
+}
+
+export async function getInstalledOllamaModels(
+  customHost?: string,
+  customPath?: string
+): Promise<{ models: OllamaModelTag[]; error?: string }> {
+  try {
+    const rawJson = await invoke<string>('fetch_ollama_tags', { customHost });
     const data = JSON.parse(rawJson);
     return { models: (data.models as OllamaModelTag[]) || [] };
-  } catch (initialErr: any) {
+  } catch {
     try {
-      await invoke('start_ollama_service');
-      const retryJson = await invoke<string>('fetch_ollama_tags');
+      await startOllama(customPath, customHost);
+      const retryJson = await invoke<string>('fetch_ollama_tags', { customHost });
       const data = JSON.parse(retryJson);
       return { models: (data.models as OllamaModelTag[]) || [] };
     } catch (rustErr: any) {
-      const rustMsg = rustErr?.toString() || '';
+      const host = customHost || DEFAULT_OLLAMA_HOST;
       try {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 4000);
-        const res = await fetch(`${OLLAMA_HOST}/api/tags`, {
+        const timeout = setTimeout(() => controller.abort(), 3500);
+        const res = await fetch(`${host.replace(/\/+$/, '')}/api/tags`, {
           headers: { Accept: 'application/json' },
           signal: controller.signal,
         });
@@ -63,16 +84,11 @@ export async function getInstalledOllamaModels(): Promise<{ models: OllamaModelT
       } catch (fetchErr: any) {
         return {
           models: [],
-          error: `Ollama offline. Falha ao auto-iniciar: ${rustMsg}`,
+          error: `Ollama offline em ${host}. Inicie com 'ollama serve' ou revise as configurações.`,
         };
       }
     }
   }
-}
-
-export async function checkOllamaOnline(): Promise<boolean> {
-  const result = await getInstalledOllamaModels();
-  return !result.error && Array.isArray(result.models);
 }
 
 export async function* streamOllama({
@@ -84,8 +100,10 @@ export async function* streamOllama({
   temperature = 0.6,
   topP = 0.9,
   contextLength,
+  customHost,
   signal,
 }: StreamOptions) {
+  const host = (customHost || DEFAULT_OLLAMA_HOST).replace(/\/+$/, '');
   const cleanModelName = model.startsWith('ollama:') ? model.replace('ollama:', '') : model;
 
   const images: string[] = [];
@@ -95,20 +113,20 @@ export async function* streamOllama({
     }
   });
 
-  // Proteção Amigável: Avisa antes de quebrar se tentar mandar imagem para modelo que só lê texto
   if (images.length > 0 && !isVisionModel(cleanModelName)) {
     throw new Error(
-      `O modelo local '${cleanModelName}' é focado em texto/código e NÃO suporta imagens. ` +
-      `Remova o anexo de imagem da mensagem, ou use um modelo com suporte a visão (como o Gemini 3.7 Flash ou o modelo local 'qwen2-vl').`
+      `O modelo local '${cleanModelName}' não possui visão multimodal. Remova a imagem ou use um modelo com suporte a visão (ex: 'llava', 'qwen2.5-vl' ou Gemini).`
     );
   }
 
-  const boundedHistory = history.slice(-25);
+  const boundedHistory = history.slice(-30);
 
   const messagesPayload: any[] = [
     {
       role: 'system',
-      content: systemInstruction || 'Você é o Esperto, um assistente desktop de inteligência artificial de alta performance focado em código e raciocínio.',
+      content:
+        systemInstruction ||
+        'Você é o Esperto, um engenheiro de software e assistente desktop de inteligência artificial de alta performance.',
     },
     ...boundedHistory.map((m) => ({
       role: m.role === 'model' ? 'assistant' : 'user',
@@ -120,11 +138,11 @@ export async function* streamOllama({
   if (images.length > 0) currentUserMsg.images = images;
   messagesPayload.push(currentUserMsg);
 
-  const targetContext = contextLength || (cleanModelName.toLowerCase().includes('14b') ? 8192 : 16384);
+  const targetContext = contextLength || (cleanModelName.toLowerCase().includes('coder') ? 16384 : 8192);
 
   let res: Response;
   try {
-    res = await fetch(`${OLLAMA_HOST}/api/chat`, {
+    res = await fetch(`${host}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -133,11 +151,8 @@ export async function* streamOllama({
         options: {
           temperature,
           top_p: topP,
-          top_k: 40,
           repeat_penalty: 1.1,
           num_ctx: targetContext,
-          num_predict: -1,
-          num_thread: 6,
         },
         keep_alive: '24h',
         stream: true,
@@ -145,7 +160,7 @@ export async function* streamOllama({
       signal,
     });
   } catch (err: any) {
-    throw new Error(`Não foi possível conectar ao Ollama em ${OLLAMA_HOST}. Verifique se o servidor está ativo.`);
+    throw new Error(`Não foi possível conectar ao Ollama em ${host}. Verifique se o servidor está ativo.`);
   }
 
   if (!res.ok) {

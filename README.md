@@ -30,7 +30,8 @@ Native, decoupled support for leading market APIs, allowing instant switching be
 - **OpenAI ChatGPT:** GPT-4o, GPT-4o Mini, GPT-4.5 Preview, o1, and o3-mini (with `reasoning_effort` tuning).
 - **DeepSeek:** DeepSeek V3 (Chat) and DeepSeek R1 (Reasoner with native Chain of Thought).
 - **OpenRouter:** Unified gateway to 200+ additional models (including Meta Llama 3.3 70B/405B, Mistral Codestral, Qwen 2.5 Coder, and free models via the `:free` suffix).
-- **Ollama (Local & Offline AI):** Direct integration with local Ollama instances (`http://localhost:11434`), enabling full privacy and zero token cost.
+- **Ollama (Local & Offline AI):** Direct integration with local Ollama instances (`http://localhost:11434`).
+- **Custom OpenAI-compatible servers:** Add multiple local or remote endpoints (LM Studio, llama.cpp, Ollama `/v1`, vLLM and compatible servers), discover their models and use streaming responses.
 
 ### 2. Local Multi-Directory Context (Smart Codebase RAG)
 - **Native Rust File Scanner:** The Rust backend recursively scans selected local folders while applying strict filters to ignore dependencies (`node_modules`, `target`, `dist`, `.git`), binary files, and heavy lockfiles.
