@@ -32,6 +32,8 @@ import {
   ChevronDown,
   Terminal,
   Layers,
+  PanelLeftClose,
+  PanelLeft,
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 
@@ -74,7 +76,6 @@ interface LoadedFile {
   content: string;
 }
 
-// Gera títulos contextuais elegantes baseados no assunto real da conversa
 function generateContextualTitle(userPrompt: string): string {
   const clean = userPrompt.trim().toLowerCase();
 
@@ -97,7 +98,6 @@ function generateContextualTitle(userPrompt: string): string {
     return 'Terminal & Scripts';
   }
 
-  // Título limpo resumido por palavras-chave
   const words = userPrompt
     .replace(/[^\w\s\u00C0-\u00FF]/gi, '')
     .split(/\s+/)
@@ -127,6 +127,9 @@ export default function App() {
   const [settings, setSettings] = useState<Settings>(defaultSettings);
   const [elapsedTime, setElapsedTime] = useState(0);
 
+  // Controle de Sidebar (Colapso)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+
   const [activeError, setActiveError] = useState<AppErrorInfo | null>(null);
   const [isUpdateOpen, setIsUpdateOpen] = useState(false);
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
@@ -148,6 +151,9 @@ export default function App() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  // Smart Scroll Lock: detecta se o usuário subiu a barra para ler
+  const isUserScrolledUp = useRef(false);
+
   const currentChat = useMemo(() => chats.find((c) => c.id === activeChatId), [chats, activeChatId]);
   const activeModelId = useMemo(
     () => currentChat?.model || settings.model || 'gemini-3.7-flash',
@@ -159,6 +165,36 @@ export default function App() {
     () => getModelInfo(activeModelId, settings.customProviders),
     [activeModelId, settings.customProviders]
   );
+
+  // Atalhos Globais de Produtividade (Ctrl+B, Ctrl+N, Ctrl+, Esc)
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      const isCmdOrCtrl = e.ctrlKey || e.metaKey;
+
+      if (isCmdOrCtrl && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        setIsSidebarOpen((prev) => !prev);
+      } else if (isCmdOrCtrl && e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        createNewChat();
+      } else if (isCmdOrCtrl && e.key === ',') {
+        e.preventDefault();
+        setIsSettingsOpen(true);
+      } else if (e.key === 'Escape') {
+        if (isLoading) {
+          handleStopGeneration();
+        } else if (isSettingsOpen || isHelpOpen || isUpdateOpen || activeArtifact) {
+          setIsSettingsOpen(false);
+          setIsHelpOpen(false);
+          setIsUpdateOpen(false);
+          setActiveArtifact(null);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [isLoading, isSettingsOpen, isHelpOpen, isUpdateOpen, activeArtifact]);
 
   useEffect(() => {
     let interval: any;
@@ -267,11 +303,22 @@ export default function App() {
     loadChatData();
   }, [activeChatId, syncDirectories]);
 
+  // Função que detecta se o usuário rolou para cima
+  const handleScrollContainer = () => {
+    if (!chatContainerRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = chatContainerRef.current;
+    // Se estiver a mais de 120px do fundo, considera que o usuário está lendo código antigo
+    isUserScrolledUp.current = scrollHeight - scrollTop - clientHeight > 120;
+  };
+
+  // Smart Auto-Scroll: Só rola se o usuário NÃO tiver rolado para cima
   useEffect(() => {
-    chatContainerRef.current?.scrollTo({
-      top: chatContainerRef.current.scrollHeight,
-      behavior: isLoading ? 'auto' : 'smooth',
-    });
+    if (!isUserScrolledUp.current) {
+      chatContainerRef.current?.scrollTo({
+        top: chatContainerRef.current.scrollHeight,
+        behavior: isLoading ? 'auto' : 'smooth',
+      });
+    }
   }, [messages, isLoading]);
 
   const handleBrowseFolder = async (): Promise<string | null> => {
@@ -372,7 +419,6 @@ export default function App() {
 
     scoredFiles.sort((a, b) => b.score - a.score);
 
-    // Contexto ampliado para até 150.000 caracteres se o Ollama estiver em 32k/64k
     const maxBudget = (settings.ollamaContextLength || 32768) > 16384 ? 90000 : 35000;
     let accumulatedChars = manifest.length;
     let includedCount = 0;
@@ -397,7 +443,7 @@ export default function App() {
     return `${manifest}=== CONTEÚDO DOS ARQUIVOS SELECIONADOS (${includedCount} arquivos) ===\n\n${filesContent}`;
   };
 
-  const createNewChat = async () => {
+  const createNewChat = () => {
     const newChat: Chat = {
       id: crypto.randomUUID(),
       title: 'Nova Sessão',
@@ -406,10 +452,11 @@ export default function App() {
       useMemory: true,
       createdAt: Date.now(),
     };
-    await db.chats.add(newChat);
+    db.chats.add(newChat);
     setChats((prev) => [newChat, ...prev]);
     setActiveChatId(newChat.id);
     setMessages([]);
+    isUserScrolledUp.current = false;
   };
 
   const handleUpdateSystemInstruction = async (val: string) => {
@@ -504,6 +551,9 @@ export default function App() {
     const textToSend = customMessageText !== undefined ? customMessageText : inputMessage;
     if ((!textToSend.trim() && attachments.length === 0) || isLoading || !activeChatId) return;
 
+    // Reseta a trava de rolagem para acompanhar a nova mensagem
+    isUserScrolledUp.current = false;
+
     let currentFiles = allLoadedFiles;
     if (directoryPaths.length > 0) {
       try {
@@ -536,7 +586,6 @@ export default function App() {
       currentMessages = [...currentMessages, userMsg];
       setMessages(currentMessages);
 
-      // Batiza o chat com um nome contextual inteligente (sem cortar texto aleatório)
       if (currentMessages.length === 1) {
         const smartTitle = generateContextualTitle(currentInput);
         await db.chats.update(activeChatId, { title: smartTitle });
@@ -664,51 +713,64 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#090b10]">
-      <Sidebar
-        chats={chats}
-        activeChatId={activeChatId}
-        onSelectChat={setActiveChatId}
-        onNewChat={createNewChat}
-        onDuplicateChat={async (id) => {
-          const s = await db.chats.get(id);
-          if (!s) return;
-          const nId = crypto.randomUUID();
-          const nChat: Chat = {
-            ...s,
-            id: nId,
-            title: `${s.title} (fork)`,
-            createdAt: Date.now(),
-          };
-          await db.chats.add(nChat);
-          setChats((prev) => [nChat, ...prev]);
-          setActiveChatId(nId);
-        }}
-        onRenameChat={async (id, title) => {
-          await db.chats.update(id, { title });
-          setChats((prev) => prev.map((c) => (c.id === id ? { ...c, title } : c)));
-        }}
-        onDeleteChat={async (id, e) => {
-          e.stopPropagation();
-          await db.chats.delete(id);
-          await db.messages.where('chatId').equals(id).delete();
-          const updated = chats.filter((c) => c.id !== id);
-          setChats(updated);
-          if (activeChatId === id) {
-            if (updated.length > 0) setActiveChatId(updated[0].id);
-            else createNewChat();
-          }
-        }}
-        onOpenSettings={() => setIsSettingsOpen(true)}
-        onOpenHelp={() => setIsHelpOpen(true)}
-        onCheckUpdate={() => handleCheckUpdate(true)}
-      />
+      {/* Sidebar Colapsável com transição limpa */}
+      {isSidebarOpen && (
+        <Sidebar
+          chats={chats}
+          activeChatId={activeChatId}
+          onSelectChat={setActiveChatId}
+          onNewChat={createNewChat}
+          onDuplicateChat={async (id) => {
+            const s = await db.chats.get(id);
+            if (!s) return;
+            const nId = crypto.randomUUID();
+            const nChat: Chat = {
+              ...s,
+              id: nId,
+              title: `${s.title} (fork)`,
+              createdAt: Date.now(),
+            };
+            await db.chats.add(nChat);
+            setChats((prev) => [nChat, ...prev]);
+            setActiveChatId(nId);
+          }}
+          onRenameChat={async (id, title) => {
+            await db.chats.update(id, { title });
+            setChats((prev) => prev.map((c) => (c.id === id ? { ...c, title } : c)));
+          }}
+          onDeleteChat={async (id, e) => {
+            e.stopPropagation();
+            await db.chats.delete(id);
+            await db.messages.where('chatId').equals(id).delete();
+            const updated = chats.filter((c) => c.id !== id);
+            setChats(updated);
+            if (activeChatId === id) {
+              if (updated.length > 0) setActiveChatId(updated[0].id);
+              else createNewChat();
+            }
+          }}
+          onOpenSettings={() => setIsSettingsOpen(true)}
+          onOpenHelp={() => setIsHelpOpen(true)}
+          onCheckUpdate={() => handleCheckUpdate(true)}
+        />
+      )}
 
       <main className="flex-1 flex flex-col h-full overflow-hidden relative bg-[#090b10]">
         <header
           data-tauri-drag-region
-          className="h-13 border-b border-[#161a25] flex items-center justify-between px-4 bg-[#0a0d13] select-none"
+          className="h-13 border-b border-[#161a25] flex items-center justify-between px-3.5 bg-[#0a0d13] select-none"
         >
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
+            {/* Botão de Alternância da Sidebar (Expandir Área de Código) */}
+            <button
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              title={isSidebarOpen ? 'Ocultar Painel Lateral (Ctrl+B)' : 'Mostrar Painel Lateral (Ctrl+B)'}
+              className="p-1.5 rounded text-zinc-400 hover:text-zinc-200 hover:bg-[#151923] transition cursor-pointer"
+            >
+              {isSidebarOpen ? <PanelLeftClose size={15} /> : <PanelLeft size={15} />}
+            </button>
+
+            {/* Seletor de Modelo */}
             <button
               onClick={() => setIsSettingsOpen(true)}
               className="h-8 px-2.5 rounded bg-[#131722] hover:bg-[#1a202f] border border-[#232a3d] text-xs font-mono flex items-center gap-2 transition text-zinc-200 cursor-pointer"
@@ -725,6 +787,7 @@ export default function App() {
               <ChevronDown size={11} className="text-zinc-500" />
             </button>
 
+            {/* Medidor de Contexto */}
             <div
               title={`Contexto: ${totalEstimatedTokens.toLocaleString()} de ${(modelInfo.contextLimit / 1000).toFixed(0)}k`}
               className="hidden md:flex items-center gap-1.5 h-8 px-2.5 rounded bg-[#10131b] border border-[#1d2332] text-[11px] font-mono text-zinc-400"
@@ -734,7 +797,7 @@ export default function App() {
                 {totalEstimatedTokens > 1000 ? `${(totalEstimatedTokens / 1000).toFixed(1)}k` : totalEstimatedTokens}
               </span>
               <span className="text-zinc-600">/</span>
-              <span className="text-zinc-500 font-bold text-emerald-400">
+              <span className="font-bold text-emerald-400">
                 {settings.ollamaContextLength ? `${settings.ollamaContextLength / 1024}k` : '32k'}
               </span>
             </div>
@@ -796,6 +859,7 @@ export default function App() {
           </div>
         </header>
 
+        {/* Drawer de Pastas do Projeto */}
         {showDirectoryDrawer && (
           <div className="p-4 bg-[#0d1018] border-b border-[#1a2130] transition space-y-3 font-sans">
             <div className="flex items-center justify-between">
@@ -923,7 +987,12 @@ export default function App() {
           </div>
         )}
 
-        <div ref={chatContainerRef} className="flex-1 overflow-y-auto">
+        {/* Linha do Tempo com Smart Scroll Lock */}
+        <div
+          ref={chatContainerRef}
+          onScroll={handleScrollContainer}
+          className="flex-1 overflow-y-auto"
+        >
           {messages.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center p-6 text-zinc-500 select-none max-w-xl mx-auto">
               <div className="w-10 h-10 rounded-lg bg-[#11151f] border border-[#22293b] flex items-center justify-center mb-3 text-zinc-400">
@@ -989,6 +1058,7 @@ export default function App() {
           )}
         </div>
 
+        {/* Input Bar */}
         <div className="p-3 bg-[#0a0d14] border-t border-[#161a25]">
           <form
             onSubmit={(e) => {
