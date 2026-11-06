@@ -21,6 +21,54 @@ export interface StreamOptions {
   signal?: AbortSignal;
 }
 
+// Função utilitária para chamar a API de Imagem/Vídeo Gratuita do Hugging Face
+async function* streamHuggingFaceMedia(prompt: string, hfToken?: string): AsyncGenerator<string> {
+  if (!hfToken || !hfToken.trim()) {
+    yield `⚠️ Para gerar imagens ou mídias via Hugging Face, insira sua Hugging Face Token nas Configurações (aba Chaves de Nuvem).`;
+    return;
+  }
+
+  yield `Processando geração multimodal no Hugging Face...\n\n`;
+
+  const isVideo = prompt.toLowerCase().includes('vídeo') || prompt.toLowerCase().includes('video');
+  const modelEndpoint = isVideo
+    ? 'https://api-inference.huggingface.co/models/stabilityai/stable-video-diffusion-img2vid-xt'
+    : 'https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell';
+
+  try {
+    const response = await fetch(modelEndpoint, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${hfToken.trim()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ inputs: prompt }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Hugging Face erro (${response.status}): ${errText}`);
+    }
+
+    const blob = await response.blob();
+    const reader = new FileReader();
+
+    const base64Data = await new Promise<string>((resolve, reject) => {
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+
+    if (isVideo) {
+      yield `\n\n### Vídeo Gerado:\n<video controls src="${base64Data}" class="max-w-md rounded-xl"></video>\n\n`;
+    } else {
+      yield `\n\n![Imagem Gerada](${base64Data})\n\n`;
+    }
+  } catch (err: any) {
+    yield `\n\n⚠️ Falha na geração de mídia: ${err?.message || err}\n\n`;
+  }
+}
+
 export async function* streamAIResponse({
   model,
   settings,
@@ -33,6 +81,13 @@ export async function* streamAIResponse({
   useMemory = true,
   signal,
 }: StreamOptions) {
+  const lowerMsg = newMessage.toLowerCase();
+  if (lowerMsg.startsWith('hf: ') || lowerMsg.startsWith('gerar imagem') || lowerMsg.startsWith('gerar vídeo')) {
+    const cleanPrompt = newMessage.replace(/^(hf:\s*|gerar imagem\s*(de)?\s*|gerar vídeo\s*(de)?\s*)/i, '').trim();
+    yield* streamHuggingFaceMedia(cleanPrompt, (settings as any).huggingfaceApiKey);
+    return;
+  }
+
   const provider = getProviderByModel(model);
   const relevantHistory = useMemory ? history : [];
 
