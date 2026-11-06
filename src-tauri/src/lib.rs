@@ -86,22 +86,6 @@ fn collect_files_with_ignore(base_path: &Path, current_path: &Path, results: &mu
     }
 }
 
-#[tauri::command]
-fn read_multiple_directories(dir_paths: Vec<String>) -> Result<Vec<FileContext>, String> {
-    let mut all_files = Vec::new();
-    for dir in dir_paths {
-        let clean = dir.trim();
-        if clean.is_empty() {
-            continue;
-        }
-        let path = Path::new(clean);
-        if path.exists() && path.is_dir() {
-            collect_files(path, path, &mut all_files, 400);
-        }
-    }
-    Ok(all_files)
-}
-
 fn parse_host_port(host_str: Option<String>) -> (String, u16) {
     let raw = host_str.unwrap_or_else(|| "127.0.0.1:11434".to_string());
     let clean = raw.trim().replace("http://", "").replace("https://", "");
@@ -141,8 +125,9 @@ async fn fetch_media_from_hf(prompt: String, token: String, is_video: bool) -> R
     }
 
     let bytes = response.bytes().await.map_err(|e| e.to_string())?;
-    let base64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes);
-    
+    use base64::Engine;
+    let base64 = base64::engine::general_purpose::STANDARD.encode(bytes);
+
     let mime = if is_video { "video/mp4" } else { "image/png" };
     Ok(format!("data:{};base64,{}", mime, base64))
 }
