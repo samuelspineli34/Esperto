@@ -17,10 +17,20 @@ import {
   BrainCircuit,
   Image,
   ShieldCheck,
+  Download,
+  FolderDown,
+  Sparkles,
 } from 'lucide-react';
 import { ModelSelector } from './ModelSelector';
 import { Settings, CustomProviderConfig, db } from '../lib/db';
-import { getInstalledOllamaModels, startOllama, checkOllamaRunning } from '../services/ollama';
+import {
+  getInstalledOllamaModels,
+  startOllama,
+  checkOllamaRunning,
+  pullOllamaModel,
+  selectGgufFile,
+  importGgufToOllama,
+} from '../services/ollama';
 import { registerLocalOllamaModels, registerCustomProviderModels } from '../lib/models';
 import { inspectProvider } from '../services/providerManager';
 import { OllamaGuideModal } from './OllamaGuideModal';
@@ -49,6 +59,15 @@ export const SettingsModal: React.FC<Props> = ({
   const [isOllamaGuideOpen, setIsOllamaGuideOpen] = useState(false);
   const [testingProviderId, setTestingProviderId] = useState<string | null>(null);
   const [providerStatuses, setProviderStatuses] = useState<Record<string, { ok: boolean; latency: number; error?: string }>>({});
+
+  // Hub Local Sem Censura
+  const [pullModelTag, setPullModelTag] = useState('');
+  const [isPulling, setIsPulling] = useState(false);
+  const [pullProgress, setPullProgress] = useState(0);
+  const [pullStatus, setPullStatus] = useState('');
+  const [ggufModelName, setGgufModelName] = useState('');
+  const [selectedGgufPath, setSelectedGgufPath] = useState('');
+  const [isImportingGguf, setIsImportingGguf] = useState(false);
 
   useEffect(() => {
     setForm(initialSettings);
@@ -86,6 +105,73 @@ export const SettingsModal: React.FC<Props> = ({
       });
     } finally {
       setStartingOllama(false);
+    }
+  };
+
+  const handlePullModel = async (tagToPull?: string) => {
+    const targetTag = tagToPull || pullModelTag;
+    if (!targetTag.trim()) return;
+
+    setIsPulling(true);
+    setPullProgress(0);
+    setPullStatus('Iniciando conexão com o Ollama...');
+
+    try {
+      await pullOllamaModel(targetTag, form.ollamaHost, (percent, status) => {
+        setPullProgress(percent);
+        setPullStatus(status);
+      });
+      setPullStatus('Modelo pronto no PC!');
+      setPullModelTag('');
+      await checkOllamaStatusQuick();
+      setTimeout(() => {
+        setIsPulling(false);
+        setPullStatus('');
+      }, 2500);
+    } catch (err: any) {
+      setIsPulling(false);
+      onErrorTrigger({
+        title: 'Falha ao Baixar Modelo',
+        context: `Tag: ${targetTag}`,
+        message: err?.message || err?.toString() || 'Erro durante o download.',
+      });
+    }
+  };
+
+  const handleSelectGguf = async () => {
+    try {
+      const path = await selectGgufFile();
+      if (path) {
+        setSelectedGgufPath(path);
+        const fileName = path.split(/[/\\]/).pop()?.replace('.gguf', '') || 'modelo-local';
+        setGgufModelName(fileName.toLowerCase().replace(/[^a-z0-9_-]/g, '-'));
+      }
+    } catch (err: any) {
+      onErrorTrigger({
+        title: 'Erro ao Selecionar Arquivo',
+        context: 'Seletor Nativo GGUF',
+        message: err?.toString() || 'Não foi possível selecionar o arquivo.',
+      });
+    }
+  };
+
+  const handleImportGguf = async () => {
+    if (!selectedGgufPath || !ggufModelName.trim()) return;
+    setIsImportingGguf(true);
+    try {
+      await importGgufToOllama(ggufModelName.trim(), selectedGgufPath);
+      setSelectedGgufPath('');
+      setGgufModelName('');
+      await checkOllamaStatusQuick();
+      alert(`Modelo '${ggufModelName}' importado com sucesso! Já está disponível na lista.`);
+    } catch (err: any) {
+      onErrorTrigger({
+        title: 'Falha ao Importar GGUF',
+        context: selectedGgufPath,
+        message: err?.toString() || 'Não foi possível registrar o modelo no Ollama.',
+      });
+    } finally {
+      setIsImportingGguf(false);
     }
   };
 
@@ -157,7 +243,7 @@ export const SettingsModal: React.FC<Props> = ({
           </div>
           <div>
             <h2 className="text-base font-bold text-white tracking-wide">Configurações do Esperto</h2>
-            <p className="text-xs text-purple-300/60">Controle total sobre provedores, Ollama, chaves e comportamento.</p>
+            <p className="text-xs text-purple-300/60">Controle de modelos locais, sem censura, servidores e privacidade.</p>
           </div>
         </div>
 
@@ -177,11 +263,11 @@ export const SettingsModal: React.FC<Props> = ({
             type="button"
             onClick={() => setActiveTab('ollama')}
             className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer ${
-              activeTab === 'ollama' ? 'bg-purple-950/80 text-purple-300 border border-purple-500/50' : 'text-gray-400 hover:text-white'
+              activeTab === 'ollama' ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/50 shadow-sm' : 'text-gray-400 hover:text-white'
             }`}
           >
-            <Cpu size={13} />
-            <span>Ollama Local</span>
+            <Cpu size={13} className="text-emerald-400" />
+            <span>Ollama & Hub Local</span>
           </button>
 
           <button
@@ -223,7 +309,7 @@ export const SettingsModal: React.FC<Props> = ({
             <div className="space-y-4">
               <div>
                 <label className="text-xs font-semibold text-purple-200 mb-1.5 block">
-                  Modelo Padrão Global (aplicado a novos chats):
+                  Modelo Padrão Ativo (aplicado a novas conversas):
                 </label>
                 <ModelSelector
                   selectedModel={form.model || 'gemini-3.7-flash'}
@@ -238,10 +324,10 @@ export const SettingsModal: React.FC<Props> = ({
                   <div>
                     <span className="text-xs font-bold text-white flex items-center gap-1.5">
                       <Server size={14} className="text-purple-400" />
-                      <span>Servidores OpenAI-Compatible Personalizados</span>
+                      <span>Servidores OpenAI-Compatible (LM Studio / vLLM / llama.cpp)</span>
                     </span>
                     <p className="text-[11px] text-gray-400 mt-0.5">
-                      Adicione LM Studio, vLLM, llama.cpp, FastChat ou endpoints remotos.
+                      Conecte instâncias locais em qualquer porta com zero censura.
                     </p>
                   </div>
                   <button
@@ -314,7 +400,7 @@ export const SettingsModal: React.FC<Props> = ({
                             <div className={`p-2 rounded-xl text-[11px] font-mono flex items-center justify-between ${
                               status.ok ? 'bg-emerald-950/40 text-emerald-300 border border-emerald-900/40' : 'bg-red-950/40 text-red-300 border border-red-900/40'
                             }`}>
-                              <span>{status.ok ? `Conectado com sucesso! (${status.latency}ms)` : `Erro: ${status.error}`}</span>
+                              <span>{status.ok ? `Conectado com sucesso (${status.latency}ms)` : `Erro: ${status.error}`}</span>
                               <span>{prov.models.length} modelos encontrados</span>
                             </div>
                           )}
@@ -329,11 +415,12 @@ export const SettingsModal: React.FC<Props> = ({
 
           {activeTab === 'ollama' && (
             <div className="space-y-4">
+              {/* Status do Servidor */}
               <div className="p-4 bg-emerald-950/20 border border-emerald-900/40 rounded-2xl space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Cpu size={16} className="text-emerald-400" />
-                    <span className="text-xs font-bold text-emerald-300">Painel do Ollama Local</span>
+                    <span className="text-xs font-bold text-emerald-300">Motor Ollama Local (GPU)</span>
                   </div>
 
                   <div className="flex items-center gap-2">
@@ -343,7 +430,7 @@ export const SettingsModal: React.FC<Props> = ({
                       className="text-xs text-purple-300 hover:text-white flex items-center gap-1 p-1"
                     >
                       <HelpCircle size={14} />
-                      <span>Como Funciona?</span>
+                      <span>Guia e Dicas</span>
                     </button>
 
                     <button
@@ -362,7 +449,7 @@ export const SettingsModal: React.FC<Props> = ({
                   <div className="flex items-center gap-2">
                     {ollamaOnline ? <CheckCircle2 size={16} className="text-emerald-400" /> : <AlertCircle size={16} className="text-amber-400" />}
                     <span className="font-semibold text-gray-200">
-                      {ollamaOnline ? 'Servidor Ollama Online e Pronto para Inferência' : 'Servidor Offline ou Não Detectado'}
+                      {ollamaOnline ? 'Servidor Ollama Online e Ativo' : 'Servidor Offline'}
                     </span>
                   </div>
 
@@ -378,32 +465,144 @@ export const SettingsModal: React.FC<Props> = ({
                     </button>
                   )}
                 </div>
+              </div>
 
-                <div className="space-y-2 pt-2 border-t border-emerald-900/30">
-                  <label className="text-[11px] font-semibold text-emerald-200 block">
-                    Host / Endereço do Servidor Ollama:
-                  </label>
+              {/* BAIXAR DIRETO DO HUGGING FACE OU OLLAMA */}
+              <div className="p-4 bg-background/50 border border-purple-900/30 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-purple-200 flex items-center gap-1.5">
+                    <Download size={14} className="text-purple-400" />
+                    <span>Baixar Modelo Sem Censura (Hugging Face / Ollama)</span>
+                  </span>
+                  <span className="text-[10px] text-gray-400 font-mono">Suporta hf.co/...</span>
+                </div>
+
+                <p className="text-[11px] text-gray-400">
+                  Cole o identificador ou URL do Hugging Face (ex: <code>hf.co/OBLITERATUS/DeepSeek-V4.1-Flash-1017-obliterated</code>) ou tag do Ollama:
+                </p>
+
+                <div className="flex gap-2">
                   <input
                     type="text"
-                    value={form.ollamaHost || 'http://127.0.0.1:11434'}
-                    onChange={(e) => setForm((prev) => ({ ...prev, ollamaHost: e.target.value }))}
-                    placeholder="http://127.0.0.1:11434"
-                    className="w-full bg-background border border-emerald-900/40 rounded-xl px-3 py-1.5 text-xs text-white font-mono focus:outline-none"
+                    value={pullModelTag}
+                    onChange={(e) => setPullModelTag(e.target.value)}
+                    placeholder="ex: hf.co/OBLITERATUS/DeepSeek-V4.1-Flash-1017-obliterated"
+                    className="flex-1 bg-surface border border-purple-900/40 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-purple-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handlePullModel()}
+                    disabled={isPulling || !pullModelTag.trim()}
+                    className="bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs px-4 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <Download size={14} />
+                    <span>{isPulling ? 'Baixando...' : 'Baixar Agora'}</span>
+                  </button>
+                </div>
+
+                {/* Modelos Sem Censura Recomendados com 1 Clique */}
+                <div className="pt-2">
+                  <span className="text-[10px] text-gray-400 font-bold block mb-1.5 uppercase tracking-wider">
+                    Instalar Modelos Sem Censura / Livres com 1 Clique:
+                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={isPulling}
+                      onClick={() => handlePullModel('dolphin-mistral:latest')}
+                      className="px-2.5 py-1 bg-purple-950/60 hover:bg-purple-900/80 border border-purple-800/40 text-purple-200 text-xs rounded-lg transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                    >
+                      <Sparkles size={11} className="text-purple-400" />
+                      <span>Dolphin Mistral (Zero Censura)</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isPulling}
+                      onClick={() => handlePullModel('qwen2.5-coder:7b')}
+                      className="px-2.5 py-1 bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-800/40 text-emerald-200 text-xs rounded-lg transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                    >
+                      <Cpu size={11} className="text-emerald-400" />
+                      <span>Qwen 2.5 Coder 7B (Especialista Código)</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isPulling}
+                      onClick={() => handlePullModel('deepseek-r1:7b')}
+                      className="px-2.5 py-1 bg-cyan-950/60 hover:bg-cyan-900/80 border border-cyan-800/40 text-cyan-200 text-xs rounded-lg transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                    >
+                      <BrainCircuit size={11} className="text-cyan-400" />
+                      <span>DeepSeek R1 7B (Raciocínio Local)</span>
+                    </button>
+                  </div>
+                </div>
+
+                {isPulling && (
+                  <div className="p-3 bg-black/60 rounded-xl border border-purple-900/40 space-y-1.5 font-mono text-xs">
+                    <div className="flex justify-between text-purple-300 text-[11px]">
+                      <span>{pullStatus}</span>
+                      <span>{pullProgress}%</span>
+                    </div>
+                    <div className="w-full bg-surface rounded-full h-2 overflow-hidden border border-purple-900/30">
+                      <div
+                        className="bg-linear-to-r from-purple-500 to-emerald-400 h-full transition-all duration-300"
+                        style={{ width: `${pullProgress}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* IMPORTAR ARQUIVO .GGUF JÁ BAIXADO NO COMPUTADOR */}
+              <div className="p-4 bg-background/50 border border-purple-900/30 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
+                    <FolderDown size={14} className="text-emerald-400" />
+                    <span>Importar Arquivo .GGUF do Computador</span>
+                  </span>
+                  <span className="text-[10px] text-gray-400">Para modelos que você já baixou</span>
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSelectGguf}
+                    className="bg-surface hover:bg-surfaceHover border border-emerald-900/40 text-emerald-200 text-xs px-3 py-2 rounded-xl transition cursor-pointer flex items-center gap-1.5"
+                  >
+                    <FolderDown size={14} />
+                    <span>Procurar arquivo .GGUF</span>
+                  </button>
+
+                  <input
+                    type="text"
+                    value={selectedGgufPath}
+                    readOnly
+                    placeholder="Nenhum arquivo .gguf selecionado..."
+                    className="flex-1 bg-surface border border-emerald-900/30 rounded-xl px-3 py-2 text-xs text-gray-300 font-mono truncate"
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <label className="text-[11px] font-semibold text-emerald-200 block">
-                    Caminho do Executável ollama.exe (Opcional se já estiver no PATH):
-                  </label>
-                  <input
-                    type="text"
-                    value={form.ollamaCustomPath || ''}
-                    onChange={(e) => setForm((prev) => ({ ...prev, ollamaCustomPath: e.target.value }))}
-                    placeholder="ex: C:\Users\Nome\AppData\Local\Programs\Ollama\ollama.exe"
-                    className="w-full bg-background border border-emerald-900/40 rounded-xl px-3 py-1.5 text-xs text-white font-mono focus:outline-none"
-                  />
-                </div>
+                {selectedGgufPath && (
+                  <div className="flex gap-2 pt-1 items-center">
+                    <span className="text-xs text-gray-300 font-mono shrink-0">Nome do Modelo:</span>
+                    <input
+                      type="text"
+                      value={ggufModelName}
+                      onChange={(e) => setGgufModelName(e.target.value)}
+                      placeholder="meu-modelo-sem-censura"
+                      className="flex-1 bg-surface border border-emerald-500/40 rounded-xl px-3 py-1.5 text-xs text-white font-mono focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleImportGguf}
+                      disabled={isImportingGguf || !ggufModelName.trim()}
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs px-4 py-1.5 rounded-xl transition cursor-pointer disabled:opacity-50"
+                    >
+                      {isImportingGguf ? 'Criando no Ollama...' : 'Concluir Importação'}
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           )}

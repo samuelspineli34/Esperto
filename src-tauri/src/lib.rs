@@ -228,6 +228,66 @@ fn select_folder() -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
+fn select_gguf_file() -> Result<Option<String>, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let script = r#"
+        Add-Type -AssemblyName System.Windows.Forms
+        $f = New-Object System.Windows.Forms.OpenFileDialog
+        $f.Filter = "Arquivos GGUF (*.gguf)|*.gguf|Todos os Arquivos (*.*)|*.*"
+        $f.Title = "Selecione o arquivo de modelo GGUF sem censura"
+        if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+            Write-Output $f.FileName
+        }
+        "#;
+        let output = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", script])
+            .output()
+            .map_err(|e| e.to_string())?;
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if path.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(path))
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(None)
+    }
+}
+
+#[tauri::command]
+fn import_gguf_to_ollama(model_name: String, gguf_path: String) -> Result<String, String> {
+    let clean_name = model_name.trim().to_lowercase().replace(' ', "-");
+    let clean_path = gguf_path.trim().replace('\\', "/");
+
+    if clean_name.is_empty() || clean_path.is_empty() {
+        return Err("Nome do modelo e caminho do arquivo GGUF são obrigatórios.".to_string());
+    }
+
+    let temp_dir = std::env::temp_dir();
+    let modelfile_path = temp_dir.join(format!("Modelfile-{}", clean_name));
+    let modelfile_content = format!("FROM \"{}\"\nPARAMETER temperature 0.7\n", clean_path);
+
+    fs::write(&modelfile_path, modelfile_content)
+        .map_err(|e| format!("Erro ao criar Modelfile temporário: {}", e))?;
+
+    let output = std::process::Command::new("ollama")
+        .args(["create", &clean_name, "-f", &modelfile_path.to_string_lossy()])
+        .output()
+        .map_err(|e| format!("Falha ao executar 'ollama create': {}", e))?;
+
+    let _ = fs::remove_file(modelfile_path);
+
+    if output.status.success() {
+        Ok(format!("Modelo '{}' importado e pronto no Ollama!", clean_name))
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).to_string())
+    }
+}
+
+#[tauri::command]
 fn write_file(path: String, content: String) -> Result<String, String> {
     let clean_path = path.trim().trim_matches('"').trim_matches('\'').trim();
     if clean_path.is_empty() {
@@ -318,6 +378,8 @@ pub fn run() {
             start_ollama_service,
             fetch_ollama_tags,
             select_folder,
+            select_gguf_file,
+            import_gguf_to_ollama,
             write_file,
             execute_terminal_command
         ])

@@ -51,6 +51,68 @@ export async function startOllama(customPath?: string, customHost?: string): Pro
   return await invoke<string>('start_ollama_service', { customPath, customHost });
 }
 
+export async function selectGgufFile(): Promise<string | null> {
+  return await invoke<string | null>('select_gguf_file');
+}
+
+export async function importGgufToOllama(modelName: string, ggufPath: string): Promise<string> {
+  return await invoke<string>('import_gguf_to_ollama', { modelName, ggufPath });
+}
+
+export async function pullOllamaModel(
+  modelName: string,
+  customHost?: string,
+  onProgress?: (percent: number, status: string) => void
+): Promise<void> {
+  const host = (customHost || DEFAULT_OLLAMA_HOST).replace(/\/+$/, '');
+  let cleanName = modelName.trim();
+
+  // Converte URLs do Hugging Face coladas direto pelo usuário
+  if (cleanName.includes('huggingface.co/')) {
+    cleanName = cleanName.replace(/https?:\/\/huggingface\.co\//, 'hf.co/');
+  }
+
+  const res = await fetch(`${host}/api/pull`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: cleanName, stream: true }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Falha ao baixar modelo (${res.status}): ${await res.text()}`);
+  }
+
+  const reader = res.body?.getReader();
+  const decoder = new TextDecoder();
+  if (!reader) return;
+
+  let buffer = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (line.trim()) {
+        try {
+          const data = JSON.parse(line);
+          const status = data.status || 'Baixando...';
+          let percent = 0;
+          if (data.total && data.completed) {
+            percent = Math.round((data.completed / data.total) * 100);
+          }
+          if (onProgress) {
+            onProgress(percent, status);
+          }
+        } catch (_) {}
+      }
+    }
+  }
+}
+
 export async function getInstalledOllamaModels(
   customHost?: string,
   customPath?: string
@@ -115,7 +177,7 @@ export async function* streamOllama({
 
   if (images.length > 0 && !isVisionModel(cleanModelName)) {
     throw new Error(
-      `O modelo local '${cleanModelName}' não possui visão multimodal. Remova a imagem ou use um modelo com suporte a visão (ex: 'llava', 'qwen2.5-vl' ou Gemini).`
+      `O modelo local '${cleanModelName}' não possui visão multimodal. Remova a imagem ou use um modelo com visão.`
     );
   }
 
@@ -126,7 +188,7 @@ export async function* streamOllama({
       role: 'system',
       content:
         systemInstruction ||
-        'Você é o Esperto, um engenheiro de software e assistente desktop de inteligência artificial de alta performance.',
+        'Você é o Esperto, um engenheiro de software e assistente de inteligência artificial de alta performance sem filtros ou restrições.',
     },
     ...boundedHistory.map((m) => ({
       role: m.role === 'model' ? 'assistant' : 'user',
