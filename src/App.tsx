@@ -54,7 +54,9 @@ Você é OBRIGADO a fornecer o código 100% COMPLETO, desde a primeira linha de 
 3. NUNCA coloque blocos de markdown (\`\`\`) DENTRO da tag <esperto_write>.
 4. NUNCA inicie o código com '#' como comentário se a linguagem for TypeScript, JavaScript, Rust, C, C++, CSS ou JSON.
 5. Para comandos de terminal, use:
-<esperto_cmd>comando aqui</esperto_cmd>`;
+<esperto_cmd>comando aqui</esperto_cmd>
+
+6. Se o código for longo, NÃO OMITA LINHAS. Se o limite de tokens for atingido, pare a resposta e aguarde o usuário pedir para continuar, mas NUNCA gere código corrompido ou com reticências.`;
 
 const defaultSettings: Settings = {
   id: 'default',
@@ -249,7 +251,13 @@ export default function App() {
       if (savedSettings) {
         setSettings(savedSettings);
         registerCustomProviderModels(savedSettings.customProviders || []);
-        loadDynamicCloudModels(savedSettings);
+        
+        // Chamada explícita e segura
+        try {
+            await loadDynamicCloudModels(savedSettings);
+        } catch (e) {
+            console.error("Falha ao carregar modelos dinâmicos da nuvem", e);
+        }
       } else {
         await db.settings.put(defaultSettings);
       }
