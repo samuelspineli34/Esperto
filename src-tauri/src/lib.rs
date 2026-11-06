@@ -119,9 +119,10 @@ fn check_ollama_status(custom_host: Option<String>) -> Result<bool, String> {
     Ok(TcpStream::connect_timeout(&socket_addr, Duration::from_millis(500)).is_ok())
 }
 
-#[tauri::command]
+#   [tauri::command]
 async fn fetch_media_from_hf(prompt: String, token: String, is_video: bool) -> Result<String, String> {
     let client = reqwest::Client::new();
+    // FLUX.1 para imagem, SVD para vídeo
     let endpoint = if is_video {
         "https://api-inference.huggingface.co/models/stabilityai/stable-video-diffusion-img2vid-xt"
     } else {
@@ -140,7 +141,7 @@ async fn fetch_media_from_hf(prompt: String, token: String, is_video: bool) -> R
     }
 
     let bytes = response.bytes().await.map_err(|e| e.to_string())?;
-    let base64 = base64::encode(bytes);
+    let base64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes);
     
     let mime = if is_video { "video/mp4" } else { "image/png" };
     Ok(format!("data:{};base64,{}", mime, base64))
@@ -450,7 +451,8 @@ pub fn run() {
             import_gguf_to_ollama,
             write_file,
             execute_terminal_command,
-            download_and_run_installer
+            download_and_run_installer,
+            fetch_media_from_hf 
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {
