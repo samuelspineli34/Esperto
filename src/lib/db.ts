@@ -58,7 +58,7 @@ export interface Settings {
   // Ollama & GPU
   ollamaCustomPath?: string;
   ollamaHost?: string;
-  ollamaContextLength?: number; // ex: 32768, 65536, 131072
+  ollamaContextLength?: number;
 
   // Segurança do Agente
   requireActionConfirmation?: boolean;

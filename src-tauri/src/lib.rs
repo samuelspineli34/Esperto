@@ -350,6 +350,41 @@ fn execute_terminal_command(command: String, cwd: Option<String>) -> Result<Comm
     })
 }
 
+/// Baixa o instalador (.exe) diretamente da Release do GitHub em segundo plano e o dispara sem abrir navegador
+#[tauri::command]
+fn download_and_run_installer(url: String) -> Result<String, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let script = format!(
+            r#"
+            $dest = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "Esperto-AutoUpdate-Setup.exe")
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+            $client = New-Object System.Net.WebClient
+            $client.DownloadFile("{}", $dest)
+            Start-Process $dest
+            "#,
+            url
+        );
+
+        std::process::Command::new("powershell")
+            .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &script])
+            .spawn()
+            .map_err(|e| format!("Erro ao disparar instalador: {}", e))?;
+
+        // Fecha a instância atual após 2 segundos para permitir a substituição limpa
+        std::thread::spawn(|| {
+            std::thread::sleep(Duration::from_millis(2000));
+            std::process::exit(0);
+        });
+
+        Ok("Instalador disparado com sucesso.".to_string())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Err("Auto-instalação automática disponível para Windows.".to_string())
+    }
+}
+
 #[tauri::command]
 fn open_url(url: String) {
     #[cfg(target_os = "windows")]
@@ -381,7 +416,8 @@ pub fn run() {
             select_gguf_file,
             import_gguf_to_ollama,
             write_file,
-            execute_terminal_command
+            execute_terminal_command,
+            download_and_run_installer
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {

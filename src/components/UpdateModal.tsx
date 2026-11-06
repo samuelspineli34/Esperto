@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Sparkles, Download, CheckCircle2, RefreshCw, RotateCcw, ExternalLink } from 'lucide-react';
+import { X, Sparkles, Download, CheckCircle2, RefreshCw, RotateCcw } from 'lucide-react';
 import { check } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { invoke } from '@tauri-apps/api/core';
@@ -27,191 +27,170 @@ export const UpdateModal: React.FC<Props> = ({
   const [progress, setProgress] = useState(0);
   const [downloadComplete, setDownloadComplete] = useState(false);
   const [statusText, setStatusText] = useState('');
-  const [updateError, setUpdateError] = useState(false);
 
   if (!isOpen) return null;
 
   const handleInstallUpdate = async () => {
     try {
       setDownloading(true);
-      setUpdateError(false);
-      setStatusText('Verificando manifesto de atualização do Tauri...');
+      setStatusText('Verificando canais de atualização...');
 
-      const update = await check();
-      
-      // Se o Tauri retornar nulo (falta de latest.json assinado no GitHub), abrimos o instalador direto pelo navegador
-      if (!update) {
-        setDownloading(false);
-        setUpdateError(true);
-        if (release?.downloadUrl) {
-          await invoke('open_url', { url: release.downloadUrl });
+      // 1. Tenta o canal padrão do Tauri Updater
+      try {
+        const update = await check();
+        if (update) {
+          let downloaded = 0;
+          let contentLength = 0;
+
+          await update.downloadAndInstall((event) => {
+            switch (event.event) {
+              case 'Started':
+                contentLength = event.data.contentLength || 0;
+                setStatusText('Baixando nova versão...');
+                break;
+              case 'Progress':
+                downloaded += event.data.chunkLength;
+                if (contentLength > 0) {
+                  const percent = Math.round((downloaded / contentLength) * 100);
+                  setProgress(percent);
+                }
+                break;
+              case 'Finished':
+                setStatusText('Finalizando...');
+                break;
+            }
+          });
+
+          setDownloadComplete(true);
+          setStatusText('Atualização pronta! Reiniciando...');
+          setTimeout(async () => {
+            await relaunch();
+          }, 1500);
           return;
         }
-        throw new Error('O repositório do GitHub não possui o manifesto latest.json assinado necessário para atualização em segundo plano. Use o botão de baixar pelo navegador.');
+      } catch {
+        // Se latest.json der 404, cai transparentemente no fallback direto sem estourar erro
       }
 
-      let downloaded = 0;
-      let contentLength = 0;
+      // 2. Fallback Inteligente: Baixa o .exe direto da Release e roda sem abrir navegador
+      const targetDownloadUrl = release?.downloadUrl;
+      if (!targetDownloadUrl) {
+        throw new Error('Nenhum instalador executável foi localizado na Release do GitHub.');
+      }
 
-      await update.downloadAndInstall((event) => {
-        switch (event.event) {
-          case 'Started':
-            contentLength = event.data.contentLength || 0;
-            setStatusText('Baixando nova versão...');
-            break;
-          case 'Progress':
-            downloaded += event.data.chunkLength;
-            if (contentLength > 0) {
-              const percent = Math.round((downloaded / contentLength) * 100);
-              setProgress(percent);
-            }
-            break;
-          case 'Finished':
-            setStatusText('Instalando atualização...');
-            break;
-        }
-      });
+      setStatusText('Baixando nova versão em segundo plano...');
+      setProgress(40);
 
+      // Dispara o download nativo do instalador
+      await invoke('download_and_run_installer', { url: targetDownloadUrl });
+
+      setProgress(100);
       setDownloadComplete(true);
-      setStatusText('Atualização pronta! Reiniciando em instantes...');
-
-      setTimeout(async () => {
-        await relaunch();
-      }, 1500);
+      setStatusText('Iniciando o instalador da nova versão...');
 
     } catch (err: any) {
-      console.error('Erro ao atualizar:', err);
       setDownloading(false);
-      setUpdateError(true);
-
-      // Abre automaticamente o instalador no navegador se falhar a atualização em background
-      if (release?.downloadUrl) {
-        try {
-          await invoke('open_url', { url: release.downloadUrl });
-        } catch {
-          window.open(release.downloadUrl, '_blank');
-        }
-      }
-
       onErrorTrigger({
-        title: 'Atualização Automática Indisponível',
-        context: 'Tauri Updater / GitHub Releases',
-        message: 'O aplicativo tentou a atualização em segundo plano, mas o GitHub não possui o manifesto assinado exigido pelo Tauri. O Esperto abriu o instalador direto no seu navegador como alternativa.',
-        technicalDetails: err?.message || err?.toString() || 'Could not fetch a valid release JSON from remote.',
+        title: 'Falha na Instalação Automática',
+        context: 'Auto-Updater Direto',
+        message: err?.message || 'Não foi possível baixar e iniciar a nova versão automaticamente.',
+        technicalDetails: err?.toString() || 'Erro desconhecido',
       });
-    }
-  };
-
-  const handleOpenBrowser = async () => {
-    const targetUrl = release?.downloadUrl || release?.htmlUrl;
-    if (!targetUrl) return;
-    try {
-      await invoke('open_url', { url: targetUrl });
-    } catch {
-      window.open(targetUrl, '_blank');
     }
   };
 
   return (
     <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-      <div className="bg-surface border border-purple-900/40 rounded-3xl w-full max-w-md p-6 relative shadow-2xl shadow-purple-950/80">
+      <div className="bg-[#0e121a] border border-[#202738] rounded-2xl w-full max-w-md p-6 relative shadow-2xl font-sans">
         {!downloading && (
           <button
             onClick={onClose}
-            className="absolute top-4 right-4 text-gray-400 hover:text-white p-1 rounded-lg hover:bg-surfaceHover transition cursor-pointer"
+            className="absolute top-4 right-4 text-zinc-500 hover:text-white p-1 rounded transition cursor-pointer"
           >
-            <X size={18} />
+            <X size={16} />
           </button>
         )}
 
         <div className="flex items-center gap-2.5 mb-4">
-          <div className="p-2 rounded-xl bg-purple-900/40 text-purple-300 border border-purple-500/30">
-            <RefreshCw size={18} className={checking || downloading ? 'animate-spin' : ''} />
+          <div className="p-2 rounded-lg bg-[#141924] text-zinc-300 border border-[#22293b]">
+            <RefreshCw size={16} className={checking || downloading ? 'animate-spin' : ''} />
           </div>
           <div>
-            <h2 className="text-base font-bold text-white">Central de Atualizações</h2>
-            <p className="text-xs text-purple-300/60 font-mono">Versão instalada: {CURRENT_VERSION}</p>
+            <h2 className="text-sm font-semibold text-zinc-100 font-mono uppercase tracking-wide">
+              Atualizações do Sistema
+            </h2>
+            <p className="text-xs text-zinc-500 font-mono">Versão ativa: {CURRENT_VERSION}</p>
           </div>
         </div>
 
         {checking ? (
           <div className="py-8 flex flex-col items-center justify-center text-center">
-            <RefreshCw size={32} className="text-purple-400 animate-spin mb-3" />
-            <p className="text-sm text-gray-300">Consultando o GitHub por novas versões...</p>
+            <RefreshCw size={26} className="text-indigo-400 animate-spin mb-3" />
+            <p className="text-xs text-zinc-400 font-mono">Verificando novas versões no repositório...</p>
           </div>
         ) : release && release.hasUpdate ? (
           <div className="space-y-4">
-            <div className="p-3.5 rounded-2xl bg-purple-950/40 border border-purple-500/30 flex items-start gap-3">
-              <Sparkles size={20} className="text-purple-400 shrink-0 mt-0.5" />
+            <div className="p-3 rounded-xl bg-[#121622] border border-[#21293a] flex items-start gap-2.5">
+              <Sparkles size={16} className="text-emerald-400 shrink-0 mt-0.5" />
               <div className="flex-1">
-                <h3 className="text-sm font-semibold text-purple-200">
+                <span className="text-xs font-semibold text-zinc-100 block font-mono">
                   Nova versão disponível: {release.tagName}
-                </h3>
-                <p className="text-[11px] text-gray-400 mt-0.5">Lançada em {release.publishedAt}</p>
+                </span>
+                <span className="text-[10px] text-zinc-500 font-mono">Lançada em {release.publishedAt}</span>
               </div>
             </div>
 
-            <div className="bg-background/60 border border-purple-900/30 rounded-xl p-3 max-h-36 overflow-y-auto">
-              <span className="text-[11px] font-semibold text-purple-300 block mb-1">Notas da Versão:</span>
-              <p className="text-xs text-gray-300 whitespace-pre-wrap leading-relaxed font-mono">
+            <div className="bg-[#080a0f] border border-[#1d2332] rounded-xl p-3 max-h-36 overflow-y-auto">
+              <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-wider block mb-1 font-semibold">
+                Notas do Lançamento:
+              </span>
+              <p className="text-xs text-zinc-300 whitespace-pre-wrap leading-relaxed font-mono">
                 {release.body}
               </p>
             </div>
 
-            {/* Barra de Progresso */}
             {downloading && (
-              <div className="space-y-2 py-2">
-                <div className="flex justify-between text-xs text-purple-300 font-mono">
+              <div className="space-y-1.5 py-1 font-mono">
+                <div className="flex justify-between text-xs text-zinc-400">
                   <span>{statusText}</span>
                   <span>{progress}%</span>
                 </div>
-                <div className="w-full bg-background border border-purple-900/40 rounded-full h-2.5 overflow-hidden">
+                <div className="w-full bg-[#121622] rounded-full h-2 overflow-hidden border border-[#21293a]">
                   <div
-                    className="bg-linear-to-r from-purple-600 to-indigo-500 h-full transition-all duration-300 rounded-full"
+                    className="bg-emerald-400 h-full transition-all duration-300 rounded-full"
                     style={{ width: `${progress}%` }}
                   />
                 </div>
               </div>
             )}
 
-            {/* Botões de Ação */}
             {!downloading ? (
-              <div className="space-y-2">
-                <button
-                  onClick={handleInstallUpdate}
-                  className="w-full flex items-center justify-center gap-2 bg-linear-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white font-semibold py-2.5 rounded-xl transition text-sm shadow-lg shadow-purple-950/60 cursor-pointer"
-                >
-                  <Download size={16} />
-                  <span>Baixar / Atualizar ({release.tagName})</span>
-                </button>
-
-                <button
-                  onClick={handleOpenBrowser}
-                  className="w-full flex items-center justify-center gap-1.5 text-xs text-purple-300 hover:text-purple-200 p-2 rounded-xl bg-surface border border-purple-900/40 transition cursor-pointer"
-                >
-                  <span>Abrir Página do GitHub (.exe)</span>
-                  <ExternalLink size={13} />
-                </button>
-              </div>
+              <button
+                onClick={handleInstallUpdate}
+                className="w-full flex items-center justify-center gap-2 bg-zinc-200 hover:bg-white text-zinc-900 font-semibold py-2.5 rounded-xl transition text-xs font-mono shadow-sm cursor-pointer"
+              >
+                <Download size={14} />
+                <span>Atualizar Agora ({release.tagName})</span>
+              </button>
             ) : downloadComplete ? (
-              <div className="p-2.5 bg-emerald-950/40 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 flex items-center justify-center gap-2">
-                <RotateCcw size={14} className="animate-spin" />
-                <span>Reiniciando aplicativo...</span>
+              <div className="p-2.5 bg-emerald-950/40 border border-emerald-600/40 rounded-xl text-xs text-emerald-300 font-mono flex items-center justify-center gap-2">
+                <RotateCcw size={13} className="animate-spin" />
+                <span>Instalador iniciado, finalizando...</span>
               </div>
             ) : null}
           </div>
         ) : (
           <div className="py-6 flex flex-col items-center justify-center text-center space-y-3">
-            <CheckCircle2 size={42} className="text-emerald-400" />
+            <CheckCircle2 size={36} className="text-emerald-400" />
             <div>
-              <p className="text-sm font-semibold text-white">Você está na versão mais recente!</p>
-              <p className="text-xs text-gray-400 mt-1">O Esperto está 100% atualizado ({CURRENT_VERSION}).</p>
+              <p className="text-xs font-semibold text-zinc-200 font-mono">Sistema Atualizado</p>
+              <p className="text-[11px] text-zinc-500 font-mono mt-0.5">Você está na versão mais recente ({CURRENT_VERSION}).</p>
             </div>
             <button
               onClick={onCheckAgain}
-              className="mt-2 text-xs font-medium text-purple-300 hover:text-purple-200 bg-surface border border-purple-900/40 px-3 py-1.5 rounded-xl hover:bg-surfaceHover transition cursor-pointer"
+              className="mt-1 text-xs font-mono text-zinc-400 hover:text-white bg-[#141924] border border-[#22293b] px-3 py-1.5 rounded-lg transition cursor-pointer"
             >
-              Verificar Novamente
+              Checar Novamente
             </button>
           </div>
         )}
@@ -219,3 +198,5 @@ export const UpdateModal: React.FC<Props> = ({
     </div>
   );
 };
+
+export default UpdateModal;

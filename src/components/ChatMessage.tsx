@@ -16,7 +16,6 @@ import {
   ChevronDown,
   ChevronRight,
   ShieldAlert,
-  FolderSync,
   Layers,
 } from 'lucide-react';
 import { Attachment } from '../lib/db';
@@ -37,8 +36,11 @@ export interface ChatMessageProps {
 
 function cleanCodeForWriting(filePath: string, rawCode: string): string {
   let cleaned = rawCode.trim();
+
+  // 1. Remove cercas markdown e tags aninhadas acidentalmente
   cleaned = cleaned.replace(/^```[a-zA-Z0-9_-]*\r?\n/, '');
   cleaned = cleaned.replace(/\r?\n```\s*$/, '');
+  cleaned = cleaned.replace(/<\/?esperto_write[^>]*>/gi, '');
 
   const lines = cleaned.split(/\r?\n/);
   if (lines.length > 0) {
@@ -68,6 +70,18 @@ function cleanCodeForWriting(filePath: string, rawCode: string): string {
   return cleaned.trim();
 }
 
+function hasOmissionEllipsis(code: string): boolean {
+  const lines = code.split(/\r?\n/);
+  return lines.some(
+    (l) =>
+      l.trim() === '...' ||
+      l.trim() === '/* ... */' ||
+      l.trim() === '// ...' ||
+      l.trim().startsWith('// resto do código') ||
+      l.trim().startsWith('// ... existing code')
+  );
+}
+
 export const AgentFileActionCard: React.FC<{
   filePath: string;
   content: string;
@@ -90,6 +104,7 @@ export const AgentFileActionCard: React.FC<{
   const [errorMsg, setErrorMsg] = useState('');
 
   const cleanedContent = cleanCodeForWriting(currentFilePath, content);
+  const hasEllipsis = hasOmissionEllipsis(cleanedContent);
 
   const resolveAbsolutePath = (pathInput: string): string => {
     let p = pathInput.trim().replace(/^['"]|['"]$/g, '');
@@ -201,7 +216,7 @@ export const AgentFileActionCard: React.FC<{
                 className="bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs px-2.5 py-1 rounded transition flex items-center gap-1 shadow-xs cursor-pointer"
               >
                 <Check size={12} />
-                <span>Confirmar</span>
+                <span>Confirmar Gravação</span>
               </button>
               <button
                 type="button"
@@ -239,6 +254,13 @@ export const AgentFileActionCard: React.FC<{
           )}
         </div>
       </div>
+
+      {hasEllipsis && (
+        <div className="px-3 py-1.5 bg-amber-950/30 text-amber-300 text-[11px] font-mono border-b border-amber-900/30 flex items-center gap-1.5">
+          <AlertTriangle size={12} className="text-amber-400 shrink-0" />
+          <span>Atenção: O modelo incluiu trechos resumidos (...). Inspecione o código antes de gravar.</span>
+        </div>
+      )}
 
       {status === 'error' && (
         <div className="p-2.5 bg-rose-950/40 text-rose-300 text-xs font-mono border-b border-rose-900/30 flex items-center gap-2">
@@ -365,7 +387,6 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(content);
 
-  // Estado do Lote de Gravação
   const [isBatchWriting, setIsBatchWriting] = useState(false);
   const [batchProgress, setBatchProgress] = useState(0);
   const [batchStatusText, setBatchStatusText] = useState('');
@@ -433,7 +454,6 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
 
     combinedMatches.sort((a, b) => a.index - b.index);
 
-    // PAINEL DE GRAVAÇÃO EM LOTE COM BARRA DE PROGRESSO REAL
     if (fileMatches.length > 1) {
       parts.push(
         <div key="batch-panel" className="my-3 p-3 bg-[#0d141e] border border-[#1e2a3c] rounded-xl space-y-2">
@@ -629,6 +649,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                   type="button"
                   onClick={handleCopyMessage}
                   className="text-zinc-500 hover:text-zinc-300 transition text-[11px] flex items-center gap-1 cursor-pointer font-mono"
+                  title="Copiar texto"
                 >
                   {copied ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
                   <span>{copied ? 'copiado' : 'copiar'}</span>
@@ -640,6 +661,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                   type="button"
                   onClick={() => setIsEditing(true)}
                   className="text-zinc-500 hover:text-zinc-300 transition text-[11px] flex items-center gap-1 cursor-pointer font-mono"
+                  title="Editar mensagem"
                 >
                   <Pencil size={11} />
                   <span>editar</span>
@@ -651,6 +673,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                   type="button"
                   onClick={onRetry}
                   className="text-zinc-500 hover:text-zinc-300 transition text-[11px] flex items-center gap-1 cursor-pointer font-mono"
+                  title="Regenerar"
                 >
                   <RotateCcw size={11} />
                   <span>regenerar</span>

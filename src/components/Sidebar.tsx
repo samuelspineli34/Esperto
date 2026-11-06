@@ -61,7 +61,6 @@ export const Sidebar: React.FC<Props> = ({
 
   return (
     <aside className="w-64 bg-[#0c0f16] flex flex-col h-screen border-r border-[#191e2b] select-none">
-      {/* Header com estilo técnico de ferramentas CLI/IDE */}
       <div className="h-13 px-3.5 border-b border-[#191e2b] flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className="w-6 h-6 rounded bg-[#171c28] border border-[#262e42] flex items-center justify-center text-zinc-300">
@@ -93,7 +92,6 @@ export const Sidebar: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* Botão de Nova Consulta com atalho de teclado visual */}
       <div className="p-2.5">
         <button
           onClick={onNewChat}
@@ -109,13 +107,11 @@ export const Sidebar: React.FC<Props> = ({
         </button>
       </div>
 
-      {/* Rótulo de Lista */}
       <div className="px-3 py-1 flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-zinc-500 font-semibold">
         <span>Histórico de Sessões</span>
         <span>{chats.length}</span>
       </div>
 
-      {/* Lista de Sessões / Chats */}
       <div className="flex-1 overflow-y-auto px-2 space-y-0.5">
         {chats.map((chat) => (
           <div
@@ -186,7 +182,6 @@ export const Sidebar: React.FC<Props> = ({
         ))}
       </div>
 
-      {/* Rodapé com Informações Técnicas e Configurações */}
       <div className="p-2 border-t border-[#191e2b] space-y-1 bg-[#0b0e14]">
         <button
           onClick={onOpenSettings}

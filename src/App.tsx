@@ -26,19 +26,18 @@ import {
   FolderSync,
   Plus,
   Trash2,
-  Bookmark,
   BookmarkPlus,
   Cpu,
   FolderSearch,
   ChevronDown,
   Terminal,
-  FileCode2,
   Layers,
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 
+// PROMPT RIGOROSO: Proíbe expressamente reticências (...), omissões e código parcial
 const AGENT_SYSTEM_PROMPT = `Você é o ESPERTO, um Engenheiro de Software Autônomo e Agente de Código de Alta Performance.
-Você tem acesso ao sistema de arquivos do projeto do usuário através da IDE.
+Você tem acesso direto ao sistema de arquivos do projeto do usuário através da IDE.
 
 REGRAS RÍGIDAS DE GRAVAÇÃO EM DISCO:
 1. Para criar ou alterar arquivos, use SEMPRE a tag:
@@ -46,12 +45,15 @@ REGRAS RÍGIDAS DE GRAVAÇÃO EM DISCO:
 conteúdo completo do arquivo
 </esperto_write>
 
-2. NUNCA coloque blocos de markdown (\`\`\`) DENTRO da tag <esperto_write>. O conteúdo dentro da tag deve ser EXCLUSIVAMENTE o código-fonte puro.
-3. NUNCA inicie o código com '#' como comentário se a linguagem for TypeScript, JavaScript, Rust, C, C++, CSS ou JSON. Use a sintaxe de comentário nativa da linguagem (ex: // no TypeScript/Rust).
-4. Para comandos de terminal, use:
+2. PROIBIÇÃO ABSOLUTA DE RETICÊNCIAS OU CÓDIGO PARCIAL:
+NUNCA use "...", "// resto do código", "/* código anterior continua igual */" ou omissões dentro de <esperto_write>.
+Você é OBRIGADO a fornecer o código 100% COMPLETO, desde a primeira linha de imports até a última linha, sem economizar linhas. Se você omitir linhas ou usar "...", o arquivo em disco será destruído e corrompido.
+
+3. NUNCA coloque blocos de markdown (\`\`\`) DENTRO da tag <esperto_write>. O conteúdo dentro da tag deve ser EXCLUSIVAMENTE o código-fonte puro.
+4. NUNCA inicie o código com '#' como comentário se a linguagem for TypeScript, JavaScript, Rust, C, C++, CSS ou JSON.
+5. Para comandos de terminal, use:
 <esperto_cmd>comando aqui</esperto_cmd>
-Coloque apenas comandos executáveis diretos (ex: npm install, cargo build, npx vite build).
-5. Seja direto e forneça código completo e funcional sem comentários preguiçosos.`;
+Coloque apenas comandos executáveis diretos (ex: npm install, cargo build, npx vite build).`;
 
 const defaultSettings: Settings = {
   id: 'default',
@@ -64,11 +66,50 @@ const defaultSettings: Settings = {
   googleSearch: false,
   requireActionConfirmation: true,
   ollamaHost: 'http://127.0.0.1:11434',
+  ollamaContextLength: 32768,
 };
 
 interface LoadedFile {
   path: string;
   content: string;
+}
+
+// Gera títulos contextuais elegantes baseados no assunto real da conversa
+function generateContextualTitle(userPrompt: string): string {
+  const clean = userPrompt.trim().toLowerCase();
+
+  if (clean.includes('arquivo') && (clean.includes('pasta') || clean.includes('tem nela') || clean.includes('workspace'))) {
+    return 'Inspeção de Workspace';
+  }
+  if (clean.includes('jogo') || clean.includes('game')) {
+    return 'Desenvolvimento de Jogo';
+  }
+  if (clean.includes('refator') || clean.includes('melhorar')) {
+    return 'Refatoração de Código';
+  }
+  if (clean.includes('teste') || clean.includes('test')) {
+    return 'Testes Automatizados';
+  }
+  if (clean.includes('erro') || clean.includes('bug') || clean.includes('corrija') || clean.includes('fix')) {
+    return 'Correção de Erros';
+  }
+  if (clean.includes('terminal') || clean.includes('comando') || clean.includes('build')) {
+    return 'Terminal & Scripts';
+  }
+
+  // Título limpo resumido por palavras-chave
+  const words = userPrompt
+    .replace(/[^\w\s\u00C0-\u00FF]/gi, '')
+    .split(/\s+/)
+    .filter((w) => w.length > 2)
+    .slice(0, 4);
+
+  if (words.length > 0) {
+    const capitalized = words.map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    return capitalized.slice(0, 26);
+  }
+
+  return 'Nova Sessão';
 }
 
 export default function App() {
@@ -141,10 +182,6 @@ export default function App() {
     return Math.ceil(charCount / 3.8);
   }, [messages, inputMessage, systemInstruction, settings.globalMemory]);
 
-  const tokenUsagePercent = useMemo(() => {
-    return Math.min(100, Math.round((totalEstimatedTokens / modelInfo.contextLimit) * 1000) / 10);
-  }, [totalEstimatedTokens, modelInfo.contextLimit]);
-
   useEffect(() => {
     const initLocalModels = async () => {
       await ensureOllamaRunning(settings.ollamaHost, settings.ollamaCustomPath);
@@ -196,7 +233,7 @@ export default function App() {
           await db.chats.update(activeChatId, { directoryPaths: validPaths });
         }
       } catch (err: any) {
-        console.warn('Erro ao ler pastas:', err);
+        console.warn('Auto-sync:', err);
       } finally {
         setLoadingDirectories(false);
       }
@@ -335,21 +372,22 @@ export default function App() {
 
     scoredFiles.sort((a, b) => b.score - a.score);
 
-    const MAX_CHARS_BUDGET = 45000;
+    // Contexto ampliado para até 150.000 caracteres se o Ollama estiver em 32k/64k
+    const maxBudget = (settings.ollamaContextLength || 32768) > 16384 ? 90000 : 35000;
     let accumulatedChars = manifest.length;
     let includedCount = 0;
     let filesContent = '';
 
     for (const f of scoredFiles) {
-      if (f.score <= 0 && includedCount >= 5) break;
+      if (f.score <= 0 && includedCount >= 6) break;
 
       let contentToInclude = f.content;
       const lines = contentToInclude.split('\n');
-      if (lines.length > 250) {
-        contentToInclude = lines.slice(0, 250).join('\n') + `\n\n... [Truncado: total ${lines.length} linhas]`;
+      if (lines.length > 400) {
+        contentToInclude = lines.slice(0, 400).join('\n') + `\n\n... [Total: ${lines.length} linhas]`;
       }
 
-      if (accumulatedChars + contentToInclude.length > MAX_CHARS_BUDGET) break;
+      if (accumulatedChars + contentToInclude.length > maxBudget) break;
 
       filesContent += `=== ARQUIVO: ${f.path} ===\n${contentToInclude}\n\n`;
       accumulatedChars += contentToInclude.length;
@@ -362,7 +400,7 @@ export default function App() {
   const createNewChat = async () => {
     const newChat: Chat = {
       id: crypto.randomUUID(),
-      title: 'Sessão de Desenvolvimento',
+      title: 'Nova Sessão',
       systemInstruction: '',
       directoryPaths: directoryPaths.length > 0 ? [...directoryPaths] : [],
       useMemory: true,
@@ -498,11 +536,12 @@ export default function App() {
       currentMessages = [...currentMessages, userMsg];
       setMessages(currentMessages);
 
+      // Batiza o chat com um nome contextual inteligente (sem cortar texto aleatório)
       if (currentMessages.length === 1) {
-        const newTitle = currentInput.slice(0, 24) || currentAttachments[0]?.name || 'Sessão';
-        await db.chats.update(activeChatId, { title: newTitle });
+        const smartTitle = generateContextualTitle(currentInput);
+        await db.chats.update(activeChatId, { title: smartTitle });
         setChats((prev) =>
-          prev.map((c) => (c.id === activeChatId ? { ...c, title: newTitle } : c))
+          prev.map((c) => (c.id === activeChatId ? { ...c, title: smartTitle } : c))
         );
       }
     }
@@ -624,7 +663,7 @@ export default function App() {
   };
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-background">
+    <div className="flex h-screen w-screen overflow-hidden bg-[#090b10]">
       <Sidebar
         chats={chats}
         activeChatId={activeChatId}
@@ -664,17 +703,15 @@ export default function App() {
         onCheckUpdate={() => handleCheckUpdate(true)}
       />
 
-      <main className="flex-1 flex flex-col h-full overflow-hidden relative bg-background">
-        {/* Barra Superior estilo IDE Workspace Header */}
+      <main className="flex-1 flex flex-col h-full overflow-hidden relative bg-[#090b10]">
         <header
           data-tauri-drag-region
           className="h-13 border-b border-[#161a25] flex items-center justify-between px-4 bg-[#0a0d13] select-none"
         >
           <div className="flex items-center gap-3">
-            {/* Seletor de Modelo Compacto com LED Indicator */}
             <button
               onClick={() => setIsSettingsOpen(true)}
-              className="h-8 px-2.5 rounded bg-panel hover:bg-[#1a202f] border border-[#232a3d] text-xs font-mono flex items-center gap-2 transition text-zinc-200 cursor-pointer"
+              className="h-8 px-2.5 rounded bg-[#131722] hover:bg-[#1a202f] border border-[#232a3d] text-xs font-mono flex items-center gap-2 transition text-zinc-200 cursor-pointer"
             >
               <div
                 className={`w-2 h-2 rounded-full ${
@@ -688,18 +725,17 @@ export default function App() {
               <ChevronDown size={11} className="text-zinc-500" />
             </button>
 
-            {/* Medidor de Contexto Estilo Hardware Monitor */}
             <div
               title={`Contexto: ${totalEstimatedTokens.toLocaleString()} de ${(modelInfo.contextLimit / 1000).toFixed(0)}k`}
-              className="hidden md:flex items-center gap-1.5 h-8 px-2.5 rounded bg-surface border border-[#1d2332] text-[11px] font-mono text-zinc-400"
+              className="hidden md:flex items-center gap-1.5 h-8 px-2.5 rounded bg-[#10131b] border border-[#1d2332] text-[11px] font-mono text-zinc-400"
             >
               <span className="text-zinc-500">CTX</span>
               <span className="text-zinc-200">
                 {totalEstimatedTokens > 1000 ? `${(totalEstimatedTokens / 1000).toFixed(1)}k` : totalEstimatedTokens}
               </span>
               <span className="text-zinc-600">/</span>
-              <span className="text-zinc-500">
-                {modelInfo.contextLimit >= 1000000 ? '1M' : `${modelInfo.contextLimit / 1000}k`}
+              <span className="text-zinc-500 font-bold text-emerald-400">
+                {settings.ollamaContextLength ? `${settings.ollamaContextLength / 1024}k` : '32k'}
               </span>
             </div>
 
@@ -760,7 +796,6 @@ export default function App() {
           </div>
         </header>
 
-        {/* Drawer de Pastas do Projeto */}
         {showDirectoryDrawer && (
           <div className="p-4 bg-[#0d1018] border-b border-[#1a2130] transition space-y-3 font-sans">
             <div className="flex items-center justify-between">
@@ -804,7 +839,7 @@ export default function App() {
                   <div
                     key={preset.id}
                     onClick={() => handleApplyPreset(preset)}
-                    className="px-2.5 py-1 rounded bg-panel hover:bg-[#1a202f] border border-[#202738] text-xs font-mono text-zinc-300 flex items-center gap-1.5 cursor-pointer"
+                    className="px-2.5 py-1 rounded bg-[#131722] hover:bg-[#1a202f] border border-[#202738] text-xs font-mono text-zinc-300 flex items-center gap-1.5 cursor-pointer"
                   >
                     <span>{preset.name}</span>
                     <span className="text-[10px] text-zinc-500">({preset.paths.length})</span>
@@ -888,11 +923,9 @@ export default function App() {
           </div>
         )}
 
-        {/* Linha do Tempo de Mensagens */}
         <div ref={chatContainerRef} className="flex-1 overflow-y-auto">
           {messages.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center p-6 text-zinc-500 select-none max-w-xl mx-auto">
-              {/* Launcher / Empty State estilo Terminal / Raycast */}
               <div className="w-10 h-10 rounded-lg bg-[#11151f] border border-[#22293b] flex items-center justify-center mb-3 text-zinc-400">
                 <Terminal size={20} strokeWidth={2} />
               </div>
@@ -909,23 +942,7 @@ export default function App() {
                   type="button"
                   onClick={() =>
                     handleSendMessage(
-                      'Crie um script utilitário em TypeScript na pasta src/lib chamado formatters.ts com funções úteis.'
-                    )
-                  }
-                  className="px-3 py-2 bg-[#0e1118] hover:bg-[#141924] border border-[#1b2232] hover:border-[#2e3952] rounded-md text-left transition cursor-pointer flex items-center justify-between text-zinc-300"
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="text-zinc-500">$</span>
-                    <span>esperto --create-file formatters.ts</span>
-                  </div>
-                  <span className="text-[10px] text-zinc-600">novo arquivo</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() =>
-                    handleSendMessage(
-                      'Analise os arquivos do projeto e refatore a estrutura para melhorar a performance.'
+                      'Analise a estrutura do workspace vinculado e liste os principais arquivos e dependências.'
                     )
                   }
                   className="px-3 py-2 bg-[#0e1118] hover:bg-[#141924] border border-[#1b2232] hover:border-[#2e3952] rounded-md text-left transition cursor-pointer flex items-center justify-between text-zinc-300"
@@ -934,21 +951,7 @@ export default function App() {
                     <span className="text-zinc-500">$</span>
                     <span>esperto --audit-codebase</span>
                   </div>
-                  <span className="text-[10px] text-zinc-600">refatoração</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() =>
-                    handleSendMessage('Crie um teste unitário completo para a lógica principal do app.')
-                  }
-                  className="px-3 py-2 bg-[#0e1118] hover:bg-[#141924] border border-[#1b2232] hover:border-[#2e3952] rounded-md text-left transition cursor-pointer flex items-center justify-between text-zinc-300"
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="text-zinc-500">$</span>
-                    <span>esperto --generate-tests</span>
-                  </div>
-                  <span className="text-[10px] text-zinc-600">testes</span>
+                  <span className="text-[10px] text-zinc-600">inspeção de arquivos</span>
                 </button>
               </div>
             </div>
@@ -971,7 +974,7 @@ export default function App() {
           )}
 
           {isLoading && messages[messages.length - 1]?.content === '' && (
-            <div className="px-6 py-4 border-b border-panel bg-[#090c12]">
+            <div className="px-6 py-4 border-b border-[#131722] bg-[#090c12]">
               <div className="max-w-4xl mx-auto flex gap-3.5 items-center">
                 <span className="font-mono text-[11px] font-semibold tracking-wider text-indigo-400 uppercase w-16 shrink-0">
                   Esperto
@@ -986,7 +989,6 @@ export default function App() {
           )}
         </div>
 
-        {/* Input Bar Estilo Prompt de IDE / Editor de Comando */}
         <div className="p-3 bg-[#0a0d14] border-t border-[#161a25]">
           <form
             onSubmit={(e) => {
@@ -1030,7 +1032,7 @@ export default function App() {
                 onChange={(e) => setInputMessage(e.target.value)}
                 onKeyDown={handleKeyDown}
                 onPaste={handlePaste}
-                placeholder="Instrua o agente ou cole código... (Enter para enviar, Shift+Enter para pular linha)"
+                placeholder="Instrua o agente ou consulte os arquivos... (Enter para enviar, Shift+Enter para nova linha)"
                 className="w-full bg-transparent px-1 pt-0.5 text-xs text-zinc-100 placeholder-zinc-600 focus:outline-none resize-y min-h-14 max-h-72 leading-relaxed font-mono"
               />
 
