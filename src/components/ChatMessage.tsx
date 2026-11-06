@@ -3,9 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import {
-  Eye,
-  User,
-  FileText,
+  FileCode,
   Copy,
   Check,
   Pencil,
@@ -17,8 +15,9 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
-  FileCode,
   ShieldAlert,
+  FolderSync,
+  Layers,
 } from 'lucide-react';
 import { Attachment } from '../lib/db';
 import { invoke } from '@tauri-apps/api/core';
@@ -125,7 +124,7 @@ export const AgentFileActionCard: React.FC<{
 
       setStatus('success');
       if (onFileWritten) onFileWritten(finalPath);
-      setTimeout(() => setStatus('idle'), 4000);
+      setTimeout(() => setStatus('idle'), 3500);
     } catch (err: any) {
       console.error(err);
       setStatus('error');
@@ -133,21 +132,11 @@ export const AgentFileActionCard: React.FC<{
     }
   };
 
-  const handleApplyClick = () => {
-    if (requireConfirmation && status !== 'confirming') {
-      setStatus('confirming');
-    } else {
-      executeWrite();
-    }
-  };
-
   return (
-    <div className="my-3 rounded-2xl border border-emerald-500/30 bg-[#0d1612] overflow-hidden shadow-lg">
-      <div className="flex flex-wrap items-center justify-between gap-2 p-3 bg-emerald-950/40 border-b border-emerald-900/30">
-        <div className="flex items-center gap-2 overflow-hidden flex-1 min-w-50">
-          <div className="p-1.5 rounded-lg bg-emerald-900/40 text-emerald-300 border border-emerald-500/30 shrink-0">
-            <Save size={14} />
-          </div>
+    <div className="my-2.5 rounded-lg border border-[#21293a] bg-[#0c0f16] overflow-hidden shadow-xs font-sans">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-[#121622] border-b border-[#1c2230]">
+        <div className="flex items-center gap-2 overflow-hidden flex-1 min-w-[200px]">
+          <FileCode size={14} className="text-emerald-400 shrink-0" />
 
           <div className="overflow-hidden flex-1">
             {isEditingPath ? (
@@ -159,7 +148,7 @@ export const AgentFileActionCard: React.FC<{
                   onBlur={() => setIsEditingPath(false)}
                   onKeyDown={(e) => e.key === 'Enter' && setIsEditingPath(false)}
                   autoFocus
-                  className="bg-background border border-emerald-500 rounded px-2 py-0.5 text-xs text-white font-mono w-full"
+                  className="bg-[#090b10] border border-emerald-500/60 rounded px-2 py-0.5 text-xs text-white font-mono w-full"
                 />
                 <button
                   type="button"
@@ -172,7 +161,7 @@ export const AgentFileActionCard: React.FC<{
             ) : (
               <div className="flex items-center gap-1.5 group/path">
                 <span
-                  className="text-xs font-semibold text-emerald-200 block font-mono truncate cursor-pointer hover:underline"
+                  className="text-xs font-medium text-zinc-200 block font-mono truncate cursor-pointer hover:underline"
                   title={currentFilePath}
                   onClick={() => setIsEditingPath(true)}
                 >
@@ -181,43 +170,43 @@ export const AgentFileActionCard: React.FC<{
                 <button
                   type="button"
                   onClick={() => setIsEditingPath(true)}
-                  className="text-emerald-400/60 hover:text-emerald-300 transition opacity-0 group-hover/path:opacity-100"
-                  title="Alterar destino do arquivo"
+                  className="text-zinc-500 hover:text-zinc-300 transition opacity-0 group-hover/path:opacity-100"
+                  title="Alterar destino"
                 >
-                  <Pencil size={11} />
+                  <Pencil size={10} />
                 </button>
               </div>
             )}
-            <span className="text-[10px] text-emerald-400/80 block truncate font-mono">
-              {baseDirectories.length > 0 ? `Destino: ${baseDirectories[0]}` : 'Caminho do projeto'}
+            <span className="text-[10px] text-zinc-500 block truncate font-mono">
+              {baseDirectories.length > 0 ? baseDirectories[0] : 'Workspace'}
             </span>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0">
           <button
             type="button"
             onClick={() => setShowCode(!showCode)}
-            className="text-[11px] text-emerald-400 hover:text-emerald-200 px-2.5 py-1 rounded-lg hover:bg-emerald-900/30 transition flex items-center gap-1 cursor-pointer font-mono"
+            className="text-[11px] text-zinc-400 hover:text-zinc-200 px-2 py-1 rounded transition flex items-center gap-1 font-mono hover:bg-[#181d2a]"
           >
-            {showCode ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-            <span>{showCode ? 'Ocultar' : 'Ver Código'}</span>
+            {showCode ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            <span>{showCode ? 'Ocultar' : 'Inspecionar'}</span>
           </button>
 
           {status === 'confirming' ? (
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1">
               <button
                 type="button"
                 onClick={executeWrite}
-                className="bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs px-3 py-1.5 rounded-lg transition flex items-center gap-1 shadow-sm cursor-pointer"
+                className="bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs px-2.5 py-1 rounded transition flex items-center gap-1 shadow-xs cursor-pointer"
               >
-                <Check size={13} />
+                <Check size={12} />
                 <span>Confirmar</span>
               </button>
               <button
                 type="button"
                 onClick={() => setStatus('idle')}
-                className="bg-surface hover:bg-surfaceHover text-gray-400 text-xs px-2 py-1.5 rounded-lg transition cursor-pointer"
+                className="bg-[#181d2a] hover:bg-[#202738] text-zinc-400 text-xs px-2 py-1 rounded transition cursor-pointer"
               >
                 Cancelar
               </button>
@@ -225,25 +214,25 @@ export const AgentFileActionCard: React.FC<{
           ) : (
             <button
               type="button"
-              onClick={handleApplyClick}
+              onClick={() => (requireConfirmation ? setStatus('confirming') : executeWrite())}
               disabled={status === 'writing'}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1.5 shadow-sm cursor-pointer ${
+              className={`px-2.5 py-1 rounded text-xs font-medium transition flex items-center gap-1.5 cursor-pointer border ${
                 status === 'success'
-                  ? 'bg-emerald-600 text-white'
-                  : 'bg-linear-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white'
+                  ? 'bg-emerald-950/80 text-emerald-300 border-emerald-600/50'
+                  : 'bg-[#181d2a] hover:bg-[#222838] text-zinc-200 border-[#2b354c]'
               }`}
             >
               {status === 'writing' ? (
                 <span>Gravando...</span>
               ) : status === 'success' ? (
                 <>
-                  <CheckCircle2 size={13} />
-                  <span>Gravado no Disco</span>
+                  <CheckCircle2 size={12} className="text-emerald-400" />
+                  <span>Aplicado em Disco</span>
                 </>
               ) : (
                 <>
-                  <Save size={13} />
-                  <span>Gravar no Disco</span>
+                  <Save size={12} className="text-zinc-400" />
+                  <span>Gravar Arquivo</span>
                 </>
               )}
             </button>
@@ -252,19 +241,19 @@ export const AgentFileActionCard: React.FC<{
       </div>
 
       {status === 'error' && (
-        <div className="p-2.5 bg-red-950/60 text-red-300 text-xs font-mono border-b border-red-900/40 flex items-center gap-2">
-          <AlertTriangle size={14} className="text-red-400 shrink-0" />
+        <div className="p-2.5 bg-rose-950/40 text-rose-300 text-xs font-mono border-b border-rose-900/30 flex items-center gap-2">
+          <AlertTriangle size={13} className="text-rose-400 shrink-0" />
           <span>{errorMsg}</span>
         </div>
       )}
 
       {showCode && (
-        <div className="max-h-72 overflow-y-auto">
+        <div className="max-h-72 overflow-y-auto bg-[#07090e]">
           <SyntaxHighlighter
             PreTag="div"
             language="typescript"
             style={vscDarkPlus as any}
-            customStyle={{ margin: 0, padding: '1rem', background: 'transparent', fontSize: '0.80rem' }}
+            customStyle={{ margin: 0, padding: '0.85rem', background: 'transparent', fontSize: '0.78rem' }}
           >
             {cleanedContent}
           </SyntaxHighlighter>
@@ -297,43 +286,41 @@ export const AgentCommandActionCard: React.FC<{
         command: cleanCmd,
         cwd,
       });
-      setOutput(res.output || `Comando concluído com código ${res.exit_code}.`);
+      setOutput(res.output || `Processo finalizado com status ${res.exit_code}.`);
     } catch (err: any) {
-      setOutput(`Erro ao executar: ${err?.toString()}`);
+      setOutput(`Erro de execução: ${err?.toString()}`);
     } finally {
       setRunning(false);
     }
   };
 
   return (
-    <div className="my-3 rounded-2xl border border-purple-500/30 bg-[#120e1a] overflow-hidden shadow-lg">
-      <div className="flex items-center justify-between p-3 bg-purple-950/40 border-b border-purple-900/30">
+    <div className="my-2.5 rounded-lg border border-[#232a3a] bg-[#0c0f16] overflow-hidden shadow-xs font-sans">
+      <div className="flex items-center justify-between px-3 py-2 bg-[#121622] border-b border-[#1c2230]">
         <div className="flex items-center gap-2 overflow-hidden flex-1 mr-2">
-          <div className="p-1.5 rounded-lg bg-purple-900/40 text-purple-300 border border-purple-500/30 shrink-0">
-            <Terminal size={14} />
-          </div>
+          <Terminal size={13} className="text-indigo-400 shrink-0" />
           <div className="overflow-hidden">
-            <span className="text-xs font-semibold text-purple-200 block font-mono truncate" title={cleanCmd}>
+            <span className="text-xs font-mono font-medium text-zinc-200 block truncate" title={cleanCmd}>
               {cleanCmd}
             </span>
-            <span className="text-[10px] text-purple-400/80 font-mono">Terminal Executável</span>
+            <span className="text-[10px] text-zinc-500 font-mono">Shell de Execução</span>
           </div>
         </div>
 
         {confirming ? (
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div className="flex items-center gap-1 shrink-0">
             <button
               type="button"
               onClick={handleRun}
-              className="bg-purple-600 hover:bg-purple-500 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition flex items-center gap-1 shadow-sm cursor-pointer"
+              className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium px-2.5 py-1 rounded transition flex items-center gap-1 shadow-xs cursor-pointer"
             >
               <Check size={12} />
-              <span>Confirmar</span>
+              <span>Executar</span>
             </button>
             <button
               type="button"
               onClick={() => setConfirming(false)}
-              className="bg-surface hover:bg-surfaceHover text-gray-400 text-xs px-2 py-1.5 rounded-lg transition cursor-pointer"
+              className="bg-[#181d2a] hover:bg-[#202738] text-zinc-400 text-xs px-2 py-1 rounded transition cursor-pointer"
             >
               Cancelar
             </button>
@@ -343,150 +330,19 @@ export const AgentCommandActionCard: React.FC<{
             type="button"
             onClick={() => (requireConfirmation ? setConfirming(true) : handleRun())}
             disabled={running}
-            className="bg-purple-600 hover:bg-purple-500 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shrink-0 shadow-sm"
+            className="bg-[#181d2a] hover:bg-[#222838] border border-[#2b354c] text-zinc-200 text-xs font-medium px-2.5 py-1 rounded transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shrink-0"
           >
-            {requireConfirmation ? <ShieldAlert size={13} /> : <Terminal size={13} />}
-            <span>{running ? 'Executando...' : 'Executar'}</span>
+            {requireConfirmation ? <ShieldAlert size={12} className="text-amber-400" /> : <Terminal size={12} />}
+            <span>{running ? 'Executando...' : 'Rodar Comando'}</span>
           </button>
         )}
       </div>
 
       {output && (
-        <pre className="p-3 bg-black/80 text-purple-200 text-xs font-mono max-h-48 overflow-auto whitespace-pre-wrap select-text">
+        <pre className="p-3 bg-[#06080d] text-zinc-300 text-xs font-mono max-h-48 overflow-auto whitespace-pre-wrap select-text border-t border-[#191f2d]">
           {output}
         </pre>
       )}
-    </div>
-  );
-};
-
-export const CodeBlock: React.FC<{
-  language: string;
-  codeString: string;
-  baseDirectories?: string[];
-  onOpenArtifact?: (code: string, lang: string) => void;
-  onFileWritten?: (savedPath: string) => void;
-  onRequestSelectFolder?: () => Promise<string | null>;
-}> = ({ language, codeString, baseDirectories = [], onOpenArtifact, onFileWritten, onRequestSelectFolder }) => {
-  const [copied, setCopied] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'writing' | 'success' | 'error'>('idle');
-  const [savePath, setSavePath] = useState('arquivo-gerado.ts');
-  const isPreviewable = ['html', 'svg', 'xml', 'jsx', 'tsx'].includes(language);
-
-  const handleCopyCode = () => {
-    navigator.clipboard.writeText(codeString);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const handleQuickSaveToDisk = async () => {
-    setSaveStatus('writing');
-    try {
-      let finalPath = savePath.trim().replace(/^['"]|['"]$/g, '');
-      if (!finalPath.includes(':') && !finalPath.startsWith('/') && baseDirectories.length > 0) {
-        const base = baseDirectories[0].replace(/[\\/]$/, '');
-        finalPath = `${base}\\${finalPath.replace(/^[\\/]/, '').replace(/\//g, '\\')}`;
-      } else if (!finalPath.includes(':') && !finalPath.startsWith('/') && onRequestSelectFolder) {
-        const picked = await onRequestSelectFolder();
-        if (!picked) {
-          setSaveStatus('idle');
-          return;
-        }
-        finalPath = `${picked.replace(/[\\/]$/, '')}\\${finalPath.replace(/^[\\/]/, '').replace(/\//g, '\\')}`;
-      }
-
-      const cleanedContent = cleanCodeForWriting(finalPath, codeString);
-
-      await invoke('write_file', {
-        path: finalPath,
-        content: cleanedContent,
-      });
-
-      setSaveStatus('success');
-      if (onFileWritten) onFileWritten(finalPath);
-      setTimeout(() => {
-        setSaveStatus('idle');
-        setIsSaving(false);
-      }, 2500);
-    } catch {
-      setSaveStatus('error');
-      setTimeout(() => setSaveStatus('idle'), 3000);
-    }
-  };
-
-  return (
-    <div className="relative my-3 rounded-2xl overflow-hidden border border-purple-900/30 bg-[#0d1117] shadow-lg">
-      <div className="flex items-center justify-between px-4 py-1.5 bg-surface border-b border-purple-950/40 select-none flex-wrap gap-2">
-        <div className="flex items-center gap-2">
-          <FileCode size={13} className="text-purple-400" />
-          <span className="text-[11px] font-mono font-bold text-purple-300 uppercase tracking-wider">
-            {language || 'código'}
-          </span>
-        </div>
-
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {isPreviewable && onOpenArtifact && (
-            <button
-              type="button"
-              onClick={() => onOpenArtifact(codeString, language)}
-              className="bg-purple-950/80 hover:bg-purple-900 border border-purple-500/40 text-purple-300 text-[11px] font-semibold px-2 py-0.5 rounded-lg transition flex items-center gap-1 cursor-pointer"
-            >
-              <Play size={11} />
-              <span>Preview</span>
-            </button>
-          )}
-
-          <button
-            type="button"
-            onClick={() => setIsSaving(!isSaving)}
-            className="bg-emerald-950/80 hover:bg-emerald-900/90 border border-emerald-500/40 text-emerald-300 hover:text-white text-[11px] font-semibold px-2.5 py-0.5 rounded-lg transition flex items-center gap-1 cursor-pointer"
-          >
-            <Save size={11} />
-            <span>Gravar no Disco</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleCopyCode}
-            className="text-gray-400 hover:text-purple-300 text-[11px] font-mono flex items-center gap-1 transition cursor-pointer p-1 rounded hover:bg-surfaceHover"
-          >
-            {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
-            <span>{copied ? 'Copiado' : 'Copiar'}</span>
-          </button>
-        </div>
-      </div>
-
-      {isSaving && (
-        <div className="bg-emerald-950/40 border-b border-emerald-900/40 p-2.5 flex items-center gap-2 text-xs">
-          <span className="text-emerald-300 font-mono text-[11px] shrink-0">Caminho:</span>
-          <input
-            type="text"
-            value={savePath}
-            onChange={(e) => setSavePath(e.target.value)}
-            placeholder="src/components/NovoComponente.tsx"
-            className="flex-1 bg-background border border-emerald-500/50 rounded-lg px-2 py-1 text-xs text-white font-mono focus:outline-none"
-          />
-          <button
-            type="button"
-            onClick={handleQuickSaveToDisk}
-            disabled={saveStatus === 'writing'}
-            className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-3 py-1 rounded-lg text-xs transition flex items-center gap-1 cursor-pointer"
-          >
-            {saveStatus === 'writing' ? <span>Salvando...</span> : <Save size={12} />}
-            <span>Salvar</span>
-          </button>
-        </div>
-      )}
-
-      <SyntaxHighlighter
-        PreTag="div"
-        language={language}
-        style={vscDarkPlus as any}
-        customStyle={{ margin: 0, padding: '1rem', background: 'transparent', fontSize: '0.82rem' }}
-      >
-        {codeString}
-      </SyntaxHighlighter>
     </div>
   );
 };
@@ -509,6 +365,11 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(content);
 
+  // Estado do Lote de Gravação
+  const [isBatchWriting, setIsBatchWriting] = useState(false);
+  const [batchProgress, setBatchProgress] = useState(0);
+  const [batchStatusText, setBatchStatusText] = useState('');
+
   const handleCopyMessage = () => {
     navigator.clipboard.writeText(content);
     setCopied(true);
@@ -529,12 +390,15 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
     const cmdRegex = /<esperto_cmd>([\s\S]*?)<\/esperto_cmd>/gi;
 
     let lastIndex = 0;
+    const fileMatches: { path: string; code: string }[] = [];
     const combinedMatches: { index: number; length: number; node: React.ReactNode }[] = [];
 
     let match: RegExpExecArray | null;
     while ((match = writeRegex.exec(rawText)) !== null) {
       const detectedPath = match[1] || 'arquivo-gerado.ts';
       const fileCode = match[2];
+      fileMatches.push({ path: detectedPath, code: fileCode });
+
       combinedMatches.push({
         index: match.index,
         length: match[0].length,
@@ -569,6 +433,67 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
 
     combinedMatches.sort((a, b) => a.index - b.index);
 
+    // PAINEL DE GRAVAÇÃO EM LOTE COM BARRA DE PROGRESSO REAL
+    if (fileMatches.length > 1) {
+      parts.push(
+        <div key="batch-panel" className="my-3 p-3 bg-[#0d141e] border border-[#1e2a3c] rounded-xl space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Layers size={14} className="text-indigo-400" />
+              <span className="text-xs font-semibold text-zinc-100 font-mono">
+                {fileMatches.length} arquivos prontos para modificação
+              </span>
+            </div>
+
+            <button
+              type="button"
+              disabled={isBatchWriting}
+              onClick={async () => {
+                setIsBatchWriting(true);
+                setBatchProgress(0);
+                for (let i = 0; i < fileMatches.length; i++) {
+                  const f = fileMatches[i];
+                  setBatchStatusText(`Gravando ${i + 1}/${fileMatches.length}: ${f.path}`);
+                  let target = f.path.trim().replace(/^['"]|['"]$/g, '');
+                  if (!target.includes(':') && !target.startsWith('/') && baseDirectories.length > 0) {
+                    const base = baseDirectories[0].replace(/[\\/]$/, '');
+                    target = `${base}\\${target.replace(/^[\\/]/, '').replace(/\//g, '\\')}`;
+                  }
+                  await invoke('write_file', {
+                    path: target,
+                    content: cleanCodeForWriting(target, f.code),
+                  });
+                  if (onFileWritten) onFileWritten(target);
+                  setBatchProgress(Math.round(((i + 1) / fileMatches.length) * 100));
+                }
+                setBatchStatusText(`Todos os ${fileMatches.length} arquivos foram gravados com sucesso!`);
+                setTimeout(() => setIsBatchWriting(false), 3000);
+              }}
+              className="bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs px-3 py-1 rounded transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+            >
+              <Save size={12} />
+              <span>{isBatchWriting ? 'Gravando Lote...' : 'Gravar Todos em Disco'}</span>
+            </button>
+          </div>
+
+          {isBatchWriting && (
+            <div className="space-y-1 font-mono text-[11px]">
+              <div className="flex justify-between text-zinc-400">
+                <span>{batchStatusText}</span>
+                <span>{batchProgress}%</span>
+              </div>
+              <div className="w-full bg-[#080a0f] h-2 rounded-full overflow-hidden border border-[#1e2637]">
+                <div
+                  className="bg-emerald-500 h-full transition-all duration-200"
+                  style={{ width: `${batchProgress}%` }}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
     const renderMarkdownBlock = (textSegment: string, keyPrefix: string) => (
       <ReactMarkdown
         key={keyPrefix}
@@ -580,16 +505,30 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
             const codeString = String(children).replace(/\n$/, '');
 
             return matchLang ? (
-              <CodeBlock
-                language={lang}
-                codeString={codeString}
-                baseDirectories={baseDirectories}
-                onOpenArtifact={onOpenArtifact}
-                onFileWritten={onFileWritten}
-                onRequestSelectFolder={onRequestSelectFolder}
-              />
+              <div className="relative my-2 rounded-lg overflow-hidden border border-[#21293a] bg-[#080a0f]">
+                <div className="flex items-center justify-between px-3 py-1 bg-[#121622] border-b border-[#1c2230] text-[11px] font-mono text-zinc-400">
+                  <span>{lang || 'code'}</span>
+                  {onOpenArtifact && ['html', 'svg', 'tsx', 'jsx'].includes(lang) && (
+                    <button
+                      onClick={() => onOpenArtifact(codeString, lang)}
+                      className="hover:text-white flex items-center gap-1"
+                    >
+                      <Play size={10} />
+                      <span>Preview</span>
+                    </button>
+                  )}
+                </div>
+                <SyntaxHighlighter
+                  PreTag="div"
+                  language={lang}
+                  style={vscDarkPlus as any}
+                  customStyle={{ margin: 0, padding: '0.85rem', background: 'transparent', fontSize: '0.78rem' }}
+                >
+                  {codeString}
+                </SyntaxHighlighter>
+              </div>
             ) : (
-              <code {...rest} className="bg-surface px-1.5 py-0.5 rounded text-purple-300 font-mono text-xs border border-purple-900/40">
+              <code {...rest} className="bg-[#161a25] px-1 py-0.5 rounded text-zinc-200 font-mono text-xs border border-[#242b3d]">
                 {children}
               </code>
             );
@@ -617,118 +556,109 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
 
   return (
     <div
-      className={`flex gap-4 p-5 group ${
-        isError
-          ? 'bg-red-950/20 border-y border-red-900/30'
-          : isBot
-          ? 'bg-surface/60 border-y border-purple-950/20'
-          : 'bg-transparent'
+      className={`px-6 py-4.5 group border-b border-[#131722] ${
+        isError ? 'bg-rose-950/20' : isBot ? 'bg-[#0a0d14]' : 'bg-[#090b10]'
       }`}
     >
-      <div
-        className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 shadow-sm ${
-          isError
-            ? 'bg-red-950 text-red-400 border border-red-800/50'
-            : isBot
-            ? 'bg-linear-to-br from-purple-700 via-indigo-800 to-black text-purple-200 border border-purple-500/30'
-            : 'bg-surface text-gray-300 border border-purple-900/40'
-        }`}
-      >
-        {isError ? <AlertTriangle size={18} /> : isBot ? <Eye size={18} className="animate-pulse text-purple-300" /> : <User size={18} />}
-      </div>
+      <div className="max-w-4xl mx-auto flex gap-3.5">
+        <div className="w-16 shrink-0 pt-0.5 select-none">
+          <span
+            className={`font-mono text-[11px] font-semibold tracking-wider block uppercase ${
+              isBot ? 'text-indigo-400' : 'text-zinc-500'
+            }`}
+          >
+            {isBot ? 'Esperto' : 'Você'}
+          </span>
+        </div>
 
-      <div className="flex-1 overflow-hidden select-text leading-relaxed text-sm text-gray-200">
-        {attachments && attachments.length > 0 && (
-          <div className="flex flex-wrap gap-2 mb-3">
-            {attachments.map((att, idx) => {
-              const isImg = att.mimeType.startsWith('image/');
-              return isImg ? (
-                <div key={idx} className="relative rounded-xl overflow-hidden border border-purple-800/40 max-w-xs shadow-md">
-                  <img src={`data:${att.mimeType};base64,${att.data}`} alt={att.name} className="max-h-48 object-cover rounded-lg" />
-                </div>
-              ) : (
-                <div key={idx} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-950/50 border border-purple-800/40 text-xs text-purple-200">
-                  <FileText size={14} className="text-purple-400" />
-                  <span className="truncate max-w-45">{att.name}</span>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {isEditing ? (
-          <div className="space-y-2 mt-1">
-            <textarea
-              value={editContent}
-              onChange={(e) => setEditContent(e.target.value)}
-              rows={3}
-              className="w-full bg-background border border-purple-500/50 rounded-xl p-3 text-sm text-white focus:outline-none resize-none font-mono"
-            />
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={handleSaveEdit}
-                className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition cursor-pointer"
-              >
-                Salvar e Reenviar
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setEditContent(content);
-                  setIsEditing(false);
-                }}
-                className="bg-surface hover:bg-surfaceHover text-gray-400 text-xs font-medium px-3 py-1.5 rounded-lg transition cursor-pointer"
-              >
-                Cancelar
-              </button>
+        <div className="flex-1 overflow-hidden select-text leading-relaxed text-[13px] text-zinc-200">
+          {attachments && attachments.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-3">
+              {attachments.map((att, idx) => {
+                const isImg = att.mimeType.startsWith('image/');
+                return isImg ? (
+                  <div key={idx} className="relative rounded-lg overflow-hidden border border-[#242b3d] max-w-xs shadow-xs">
+                    <img src={`data:${att.mimeType};base64,${att.data}`} alt={att.name} className="max-h-48 object-cover" />
+                  </div>
+                ) : (
+                  <div key={idx} className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#131722] border border-[#22293b] text-xs text-zinc-300 font-mono">
+                    <FileCode size={13} className="text-zinc-400" />
+                    <span className="truncate max-w-45">{att.name}</span>
+                  </div>
+                );
+              })}
             </div>
-          </div>
-        ) : (
-          <div className={isError ? 'text-red-300 font-medium' : ''}>{parseAgentActions(content)}</div>
-        )}
+          )}
 
-        {!isEditing && (
-          <div className="flex items-center gap-3 mt-2.5 select-none">
-            {!isError && (
-              <button
-                type="button"
-                onClick={handleCopyMessage}
-                className="text-gray-500 hover:text-purple-300 transition text-xs flex items-center gap-1 cursor-pointer"
-                title="Copiar mensagem inteira"
-              >
-                {copied ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
-                <span className="text-[11px]">{copied ? 'Copiado' : 'Copiar'}</span>
-              </button>
-            )}
+          {isEditing ? (
+            <div className="space-y-2 mt-1">
+              <textarea
+                value={editContent}
+                onChange={(e) => setEditContent(e.target.value)}
+                rows={3}
+                className="w-full bg-[#07090e] border border-indigo-500/50 rounded-lg p-2.5 text-xs text-white focus:outline-none resize-none font-mono"
+              />
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleSaveEdit}
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium px-3 py-1 rounded transition cursor-pointer"
+                >
+                  Salvar e Reenviar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditContent(content);
+                    setIsEditing(false);
+                  }}
+                  className="bg-[#161a25] text-zinc-400 text-xs px-2.5 py-1 rounded transition cursor-pointer"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className={isError ? 'text-rose-300 font-medium' : ''}>{parseAgentActions(content)}</div>
+          )}
 
-            {!isBot && onEdit && (
-              <button
-                type="button"
-                onClick={() => setIsEditing(true)}
-                className="text-gray-500 hover:text-purple-300 transition text-xs flex items-center gap-1 cursor-pointer"
-                title="Editar mensagem"
-              >
-                <Pencil size={13} />
-                <span className="text-[11px]">Editar</span>
-              </button>
-            )}
+          {!isEditing && (
+            <div className="flex items-center gap-3 mt-2 select-none opacity-0 group-hover:opacity-100 transition">
+              {!isError && (
+                <button
+                  type="button"
+                  onClick={handleCopyMessage}
+                  className="text-zinc-500 hover:text-zinc-300 transition text-[11px] flex items-center gap-1 cursor-pointer font-mono"
+                >
+                  {copied ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
+                  <span>{copied ? 'copiado' : 'copiar'}</span>
+                </button>
+              )}
 
-            {isBot && onRetry && (
-              <button
-                type="button"
-                onClick={onRetry}
-                className={`transition text-xs flex items-center gap-1 cursor-pointer ${
-                  isError ? 'text-red-400 hover:text-red-300 font-semibold' : 'text-gray-500 hover:text-purple-300'
-                }`}
-                title="Tentar novamente"
-              >
-                <RotateCcw size={13} />
-                <span className="text-[11px]">{isError ? 'Tentar Novamente' : 'Regenerar'}</span>
-              </button>
-            )}
-          </div>
-        )}
+              {!isBot && onEdit && (
+                <button
+                  type="button"
+                  onClick={() => setIsEditing(true)}
+                  className="text-zinc-500 hover:text-zinc-300 transition text-[11px] flex items-center gap-1 cursor-pointer font-mono"
+                >
+                  <Pencil size={11} />
+                  <span>editar</span>
+                </button>
+              )}
+
+              {isBot && onRetry && (
+                <button
+                  type="button"
+                  onClick={onRetry}
+                  className="text-zinc-500 hover:text-zinc-300 transition text-[11px] flex items-center gap-1 cursor-pointer font-mono"
+                >
+                  <RotateCcw size={11} />
+                  <span>regenerar</span>
+                </button>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

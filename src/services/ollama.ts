@@ -29,6 +29,15 @@ interface StreamOptions {
 
 export const DEFAULT_OLLAMA_HOST = 'http://127.0.0.1:11434';
 
+export function formatBytes(bytes: number, decimals = 1): string {
+  if (!bytes || bytes === 0) return '0 B';
+  const k = 1024;
+  const dm = decimals < 0 ? 0 : decimals;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+}
+
 function isVisionModel(modelName: string): boolean {
   const lower = modelName.toLowerCase();
   return (
@@ -60,7 +69,7 @@ export async function ensureOllamaRunning(customHost?: string, customPath?: stri
     await startOllama(customPath, customHost);
     return await checkOllamaRunning(customHost);
   } catch (e) {
-    console.warn('Tentativa de auto-start do Ollama:', e);
+    console.warn('Auto-start Ollama:', e);
     return false;
   }
 }
@@ -74,6 +83,21 @@ export async function importGgufToOllama(modelName: string, ggufPath: string): P
   return await invoke<string>('import_gguf_to_ollama', { modelName, ggufPath });
 }
 
+export async function deleteOllamaModel(modelName: string, customHost?: string): Promise<void> {
+  const host = (customHost || DEFAULT_OLLAMA_HOST).replace(/\/+$/, '');
+  const cleanName = modelName.replace(/^ollama:/, '');
+
+  const res = await fetch(`${host}/api/delete`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: cleanName }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Erro ao excluir modelo (${res.status}): ${await res.text()}`);
+  }
+}
+
 export async function pullOllamaModel(
   modelName: string,
   customHost?: string,
@@ -85,8 +109,12 @@ export async function pullOllamaModel(
   const host = (customHost || DEFAULT_OLLAMA_HOST).replace(/\/+$/, '');
   let cleanName = modelName.trim();
 
-  if (cleanName.includes('huggingface.co/')) {
-    cleanName = cleanName.replace(/https?:\/\/huggingface\.co\//, 'hf.co/');
+  if (cleanName.startsWith('https://huggingface.co/')) {
+    cleanName = cleanName.replace('https://huggingface.co/', 'hf.co/');
+  } else if (cleanName.startsWith('http://huggingface.co/')) {
+    cleanName = cleanName.replace('http://huggingface.co/', 'hf.co/');
+  } else if (cleanName.includes('/') && !cleanName.startsWith('hf.co/')) {
+    cleanName = `hf.co/${cleanName}`;
   }
 
   const res = await fetch(`${host}/api/pull`, {
@@ -116,7 +144,6 @@ export async function pullOllamaModel(
       if (line.trim()) {
         const data = JSON.parse(line);
 
-        // Se o Ollama reportar erro (ex: repositório sem GGUF ou inexistente), estoura erro real
         if (data.error) {
           throw new Error(data.error);
         }
@@ -175,7 +202,7 @@ export async function getInstalledOllamaModels(
     } catch {
       return {
         models: [],
-        error: `Ollama offline em ${host}. O Esperto tentará iniciá-lo automaticamente ao receber uma mensagem.`,
+        error: `Ollama offline em ${host}. O Esperto iniciará o motor automaticamente ao enviar uma mensagem.`,
       };
     }
   }
@@ -208,18 +235,18 @@ export async function* streamOllama({
 
   if (images.length > 0 && !isVisionModel(cleanModelName)) {
     throw new Error(
-      `O modelo local '${cleanModelName}' não possui visão multimodal. Remova a imagem da mensagem ou utilize um modelo com visão.`
+      `O modelo local '${cleanModelName}' não possui visão multimodal. Remova a imagem da mensagem.`
     );
   }
 
-  const boundedHistory = history.slice(-30);
+  const boundedHistory = history.slice(-25);
 
   const messagesPayload: any[] = [
     {
       role: 'system',
       content:
         systemInstruction ||
-        'Você é o Esperto, um engenheiro de software e assistente de inteligência artificial de alta performance sem filtros ou restrições.',
+        'Você é o Esperto, um engenheiro de software autônomo e agente de código de alta performance sem filtros.',
     },
     ...boundedHistory.map((m) => ({
       role: m.role === 'model' ? 'assistant' : 'user',
@@ -231,7 +258,18 @@ export async function* streamOllama({
   if (images.length > 0) currentUserMsg.images = images;
   messagesPayload.push(currentUserMsg);
 
-  const targetContext = contextLength || (cleanModelName.toLowerCase().includes('coder') ? 16384 : 8192);
+  // CÁLCULO DINÂMICO DE CONTEXTO: Garante que o Ollama NUNCA estoure com erro 400
+  let promptTotalChars = 0;
+  messagesPayload.forEach((m) => {
+    promptTotalChars += (m.content || '').length;
+  });
+
+  const estimatedTokens = Math.ceil(promptTotalChars / 3.2);
+  const baseContext = contextLength || 32768; // Piso de 32k tokens (em vez de míseros 8k)
+
+  // Se o projeto for grande, aloca o contexto necessário com 4.096 tokens de sobra para a resposta
+  const calculatedContext = Math.max(baseContext, estimatedTokens + 4096);
+  const targetContext = Math.min(calculatedContext, 131072); // Até 128k tokens
 
   let res: Response;
   try {
@@ -245,7 +283,7 @@ export async function* streamOllama({
           temperature,
           top_p: topP,
           repeat_penalty: 1.1,
-          num_ctx: targetContext,
+          num_ctx: targetContext, // Alocação dinâmica que resolve o Erro 400
         },
         keep_alive: '24h',
         stream: true,
@@ -253,7 +291,7 @@ export async function* streamOllama({
       signal,
     });
   } catch (err: any) {
-    throw new Error(`Não foi possível conectar ao Ollama em ${host}.`);
+    throw new Error(`Falha de conexão com o Ollama em ${host}.`);
   }
 
   if (!res.ok) {

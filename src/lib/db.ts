@@ -21,7 +21,7 @@ export interface Chat {
   systemInstruction?: string;
   directoryPaths?: string[];
   useMemory?: boolean;
-  model?: string; // Modelo específico para este Chat (Override opcional)
+  model?: string;
   createdAt: number;
 }
 
@@ -46,7 +46,7 @@ export interface CustomProviderConfig {
 
 export interface Settings {
   id: string;
-  model: string; // Modelo padrão global
+  model: string;
   globalMemory?: string;
   geminiApiKey?: string;
   openaiApiKey?: string;
@@ -55,12 +55,13 @@ export interface Settings {
   openrouterApiKey?: string;
   customProviders?: CustomProviderConfig[];
 
-  // Ollama
+  // Ollama & GPU
   ollamaCustomPath?: string;
-  ollamaHost?: string; // ex: http://127.0.0.1:11434
+  ollamaHost?: string;
+  ollamaContextLength?: number; // ex: 32768, 65536, 131072
 
   // Segurança do Agente
-  requireActionConfirmation?: boolean; // Pede confirmação antes de gravar no disco ou rodar shell
+  requireActionConfirmation?: boolean;
 
   // Parâmetros de Inferência
   temperature?: number;

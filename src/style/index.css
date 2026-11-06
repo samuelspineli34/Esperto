@@ -1,17 +1,18 @@
 @import "tailwindcss";
 
 @theme {
-  --color-background: #090c10;
-  --color-surface: #111622;
-  --color-surfaceHover: #1b2336;
-  --color-accent: #7c3aed;
+  --color-background: #090b10;
+  --color-surface: #10131b;
+  --color-surfaceHover: #171b26;
+  --color-panel: #131722;
+  --color-border: #202637;
+  --color-borderSubtle: #191e2b;
 }
 
 :root {
   color-scheme: dark !important;
 }
 
-/* Garante cursor pointer em todos os botões e elementos interativos */
 button, 
 [role="button"], 
 select, 
@@ -22,27 +23,36 @@ a {
 }
 
 html, body, #root {
-  background-color: #090c10 !important;
-  color: #f3f4f6 !important;
+  background-color: #090b10 !important;
+  color: #e2e8f0 !important;
   color-scheme: dark !important;
   user-select: none;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   overflow: hidden;
   height: 100%;
   width: 100%;
 }
 
-/* Barra de rolagem estilizada escura */
+/* Scrollbar ultrafina e discreta de IDE */
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 5px;
+  height: 5px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #283046;
-  border-radius: 4px;
+  background: #23293a;
+  border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #4a3b75;
+  background: #333c54;
+}
+
+/* Seleção de texto de código */
+::selection {
+  background: #263354;
+  color: #f8fafc;
 }

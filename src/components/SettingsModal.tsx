@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   X,
   Sliders,
@@ -19,7 +19,8 @@ import {
   ShieldCheck,
   Download,
   FolderDown,
-  Sparkles,
+  HardDrive,
+  Maximize2,
 } from 'lucide-react';
 import { ModelSelector } from './ModelSelector';
 import { Settings, CustomProviderConfig, db } from '../lib/db';
@@ -30,6 +31,9 @@ import {
   pullOllamaModel,
   selectGgufFile,
   importGgufToOllama,
+  deleteOllamaModel,
+  formatBytes,
+  OllamaModelTag,
 } from '../services/ollama';
 import { registerLocalOllamaModels, registerCustomProviderModels } from '../lib/models';
 import { inspectProvider } from '../services/providerManager';
@@ -60,7 +64,7 @@ export const SettingsModal: React.FC<Props> = ({
   const [testingProviderId, setTestingProviderId] = useState<string | null>(null);
   const [providerStatuses, setProviderStatuses] = useState<Record<string, { ok: boolean; latency: number; error?: string }>>({});
 
-  // Hub Local Sem Censura
+  const [localModelsList, setLocalModelsList] = useState<OllamaModelTag[]>([]);
   const [pullModelTag, setPullModelTag] = useState('');
   const [isPulling, setIsPulling] = useState(false);
   const [pullProgress, setPullProgress] = useState(0);
@@ -68,6 +72,7 @@ export const SettingsModal: React.FC<Props> = ({
   const [ggufModelName, setGgufModelName] = useState('');
   const [selectedGgufPath, setSelectedGgufPath] = useState('');
   const [isImportingGguf, setIsImportingGguf] = useState(false);
+  const [appCacheSize, setAppCacheSize] = useState<string>('Calculando...');
 
   useEffect(() => {
     setForm(initialSettings);
@@ -76,8 +81,26 @@ export const SettingsModal: React.FC<Props> = ({
   useEffect(() => {
     if (isOpen) {
       checkOllamaStatusQuick();
+      calculateAppStorage();
     }
   }, [isOpen]);
+
+  const calculateAppStorage = async () => {
+    try {
+      if (navigator.storage && navigator.storage.estimate) {
+        const estimate = await navigator.storage.estimate();
+        setAppCacheSize(formatBytes(estimate.usage || 0));
+      } else {
+        setAppCacheSize('Disponível');
+      }
+    } catch {
+      setAppCacheSize('Desconhecido');
+    }
+  };
+
+  const totalOllamaStorageBytes = useMemo(() => {
+    return localModelsList.reduce((acc, m) => acc + (m.size || 0), 0);
+  }, [localModelsList]);
 
   const checkOllamaStatusQuick = async () => {
     setCheckingOllama(true);
@@ -85,9 +108,12 @@ export const SettingsModal: React.FC<Props> = ({
     setOllamaOnline(online);
     if (online) {
       const res = await getInstalledOllamaModels(form.ollamaHost, form.ollamaCustomPath);
+      setLocalModelsList(res.models || []);
       if (res.models.length > 0) {
         registerLocalOllamaModels(res.models);
       }
+    } else {
+      setLocalModelsList([]);
     }
     setCheckingOllama(false);
   };
@@ -109,16 +135,23 @@ export const SettingsModal: React.FC<Props> = ({
   };
 
   const handlePullModel = async (tagToPull?: string) => {
-    const targetTag = tagToPull || pullModelTag;
-    if (!targetTag.trim()) return;
+    const rawTag = tagToPull || pullModelTag;
+    if (!rawTag.trim()) return;
+
+    let cleanTag = rawTag.trim();
+    if (cleanTag.startsWith('https://huggingface.co/')) {
+      cleanTag = cleanTag.replace('https://huggingface.co/', 'hf.co/');
+    } else if (cleanTag.includes('/') && !cleanTag.startsWith('hf.co/')) {
+      cleanTag = `hf.co/${cleanTag}`;
+    }
 
     setIsPulling(true);
     setPullProgress(0);
-    setPullStatus('Iniciando conexão com o Ollama...');
+    setPullStatus('Conectando ao repositório...');
 
     try {
       await pullOllamaModel(
-        targetTag,
+        cleanTag,
         form.ollamaHost,
         form.ollamaCustomPath,
         (percent, status) => {
@@ -126,7 +159,7 @@ export const SettingsModal: React.FC<Props> = ({
           setPullStatus(status);
         }
       );
-      setPullStatus('Modelo pronto no PC!');
+      setPullStatus('Modelo pronto na GPU!');
       setPullModelTag('');
       await checkOllamaStatusQuick();
       setTimeout(() => {
@@ -137,8 +170,25 @@ export const SettingsModal: React.FC<Props> = ({
       setIsPulling(false);
       onErrorTrigger({
         title: 'Falha ao Baixar Modelo',
-        context: `Tag: ${targetTag}`,
+        context: cleanTag,
         message: err?.message || err?.toString() || 'Erro durante o download.',
+      });
+    }
+  };
+
+  const handleDeleteModel = async (modelName: string) => {
+    if (!confirm(`Deseja realmente excluir o modelo '${modelName}' e liberar o espaço no disco?`)) {
+      return;
+    }
+
+    try {
+      await deleteOllamaModel(modelName, form.ollamaHost);
+      await checkOllamaStatusQuick();
+    } catch (err: any) {
+      onErrorTrigger({
+        title: 'Falha ao Excluir Modelo',
+        context: modelName,
+        message: err?.message || err?.toString() || 'Erro ao remover modelo do disco.',
       });
     }
   };
@@ -168,7 +218,7 @@ export const SettingsModal: React.FC<Props> = ({
       setSelectedGgufPath('');
       setGgufModelName('');
       await checkOllamaStatusQuick();
-      alert(`Modelo '${ggufModelName}' importado com sucesso! Já está disponível na lista.`);
+      alert(`Modelo '${ggufModelName}' importado com sucesso! Já está disponível.`);
     } catch (err: any) {
       onErrorTrigger({
         title: 'Falha ao Importar GGUF',
@@ -234,78 +284,76 @@ export const SettingsModal: React.FC<Props> = ({
 
   return (
     <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-      <div className="bg-surface border border-purple-900/40 rounded-3xl w-full max-w-4xl p-6 relative shadow-2xl shadow-purple-950/80 max-h-[92vh] flex flex-col">
+      <div className="bg-[#0e121a] border border-[#202738] rounded-2xl w-full max-w-4xl p-6 relative shadow-2xl max-h-[92vh] flex flex-col font-sans">
         <button
           onClick={onClose}
-          className="absolute top-5 right-5 text-gray-400 hover:text-white p-1 rounded-lg hover:bg-surfaceHover transition cursor-pointer"
+          className="absolute top-5 right-5 text-zinc-400 hover:text-white p-1 rounded-lg hover:bg-[#181d2a] transition cursor-pointer"
         >
-          <X size={20} />
+          <X size={18} />
         </button>
 
-        <div className="flex items-center gap-2.5 mb-4 pb-3 border-b border-purple-950/40">
-          <div className="p-2 rounded-xl bg-purple-900/40 text-purple-300 border border-purple-500/30">
-            <Sliders size={20} />
+        <div className="flex items-center gap-2.5 mb-4 pb-3 border-b border-[#1c2232]">
+          <div className="p-2 rounded-lg bg-[#151924] text-zinc-300 border border-[#242b3d]">
+            <Sliders size={18} />
           </div>
           <div>
-            <h2 className="text-base font-bold text-white tracking-wide">Configurações do Esperto</h2>
-            <p className="text-xs text-purple-300/60">Controle de modelos locais, sem censura, servidores e privacidade.</p>
+            <h2 className="text-sm font-semibold text-zinc-100 tracking-wide font-mono uppercase">
+              Configurações do Ambiente
+            </h2>
+            <p className="text-xs text-zinc-500">Janela de contexto, GPU local e workspaces de código.</p>
           </div>
         </div>
 
-        <div className="flex gap-2 mb-4 border-b border-purple-950/30 pb-2">
+        <div className="flex gap-1.5 mb-4 border-b border-[#1c2232] pb-2 font-mono text-xs">
           <button
             type="button"
             onClick={() => setActiveTab('models')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer ${
-              activeTab === 'models' ? 'bg-purple-950/80 text-purple-300 border border-purple-500/50' : 'text-gray-400 hover:text-white'
+            className={`px-3 py-1.5 rounded-lg font-medium transition cursor-pointer ${
+              activeTab === 'models' ? 'bg-[#181e2b] text-zinc-100 border border-[#2c364d]' : 'text-zinc-500 hover:text-zinc-300'
             }`}
           >
-            <Server size={13} />
-            <span>Modelos & Provedores</span>
+            Modelos & Servidores
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('ollama')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer ${
-              activeTab === 'ollama' ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/50 shadow-sm' : 'text-gray-400 hover:text-white'
+            className={`px-3 py-1.5 rounded-lg font-medium transition cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'ollama' ? 'bg-[#121f19] text-emerald-300 border border-[#1f3a2f]' : 'text-zinc-500 hover:text-zinc-300'
             }`}
           >
             <Cpu size={13} className="text-emerald-400" />
-            <span>Ollama & Hub Local</span>
+            <span>Ollama & GPU</span>
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('params')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer ${
-              activeTab === 'params' ? 'bg-purple-950/80 text-purple-300 border border-purple-500/50' : 'text-gray-400 hover:text-white'
+            className={`px-3 py-1.5 rounded-lg font-medium transition cursor-pointer ${
+              activeTab === 'params' ? 'bg-[#181e2b] text-zinc-100 border border-[#2c364d]' : 'text-zinc-500 hover:text-zinc-300'
             }`}
           >
-            <Sliders size={13} />
-            <span>Parâmetros</span>
+            Parâmetros
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('keys')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer ${
-              activeTab === 'keys' ? 'bg-purple-950/80 text-purple-300 border border-purple-500/50' : 'text-gray-400 hover:text-white'
+            className={`px-3 py-1.5 rounded-lg font-medium transition cursor-pointer ${
+              activeTab === 'keys' ? 'bg-[#181e2b] text-zinc-100 border border-[#2c364d]' : 'text-zinc-500 hover:text-zinc-300'
             }`}
           >
-            <Key size={13} />
-            <span>Chaves de Nuvem</span>
+            Chaves de Nuvem
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('memory')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer ${
-              activeTab === 'memory' ? 'bg-purple-950/80 text-purple-300 border border-purple-500/50' : 'text-gray-400 hover:text-white'
+            className={`px-3 py-1.5 rounded-lg font-medium transition cursor-pointer ${
+              activeTab === 'memory' ? 'bg-[#181e2b] text-zinc-100 border border-[#2c364d]' : 'text-zinc-500 hover:text-zinc-300'
             }`}
           >
-            <BookOpen size={13} />
-            <span>Memória & Armazenamento</span>
+            Memória & Cache
           </button>
         </div>
 
@@ -313,8 +361,8 @@ export const SettingsModal: React.FC<Props> = ({
           {activeTab === 'models' && (
             <div className="space-y-4">
               <div>
-                <label className="text-xs font-semibold text-purple-200 mb-1.5 block">
-                  Modelo Padrão Ativo (aplicado a novas conversas):
+                <label className="text-xs font-semibold text-zinc-300 mb-1.5 block font-mono">
+                  Modelo Ativo Padrão:
                 </label>
                 <ModelSelector
                   selectedModel={form.model || 'gemini-3.7-flash'}
@@ -324,21 +372,18 @@ export const SettingsModal: React.FC<Props> = ({
                 />
               </div>
 
-              <div className="pt-3 border-t border-purple-950/40 space-y-3">
+              <div className="pt-3 border-t border-[#1c2232] space-y-3">
                 <div className="flex items-center justify-between">
                   <div>
-                    <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                      <Server size={14} className="text-purple-400" />
-                      <span>Servidores OpenAI-Compatible (LM Studio / vLLM / llama.cpp)</span>
+                    <span className="text-xs font-semibold text-zinc-200 block font-mono">
+                      Servidores OpenAI-Compatible (LM Studio / vLLM)
                     </span>
-                    <p className="text-[11px] text-gray-400 mt-0.5">
-                      Conecte instâncias locais em qualquer porta com zero censura.
-                    </p>
+                    <p className="text-[11px] text-zinc-500">Conecte servidores locais em qualquer porta.</p>
                   </div>
                   <button
                     type="button"
                     onClick={addCustomProvider}
-                    className="bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold px-3 py-1.5 rounded-xl transition flex items-center gap-1 cursor-pointer"
+                    className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition flex items-center gap-1 cursor-pointer"
                   >
                     <Plus size={13} />
                     <span>Adicionar Servidor</span>
@@ -346,29 +391,29 @@ export const SettingsModal: React.FC<Props> = ({
                 </div>
 
                 {(!form.customProviders || form.customProviders.length === 0) ? (
-                  <p className="text-xs text-gray-500 bg-background/50 p-3 rounded-xl border border-purple-900/20">
-                    Nenhum servidor customizado adicionado.
+                  <p className="text-xs text-zinc-500 bg-[#080a0f] p-3 rounded-lg border border-[#1a202c]">
+                    Nenhum servidor customizado registrado.
                   </p>
                 ) : (
-                  <div className="space-y-3">
+                  <div className="space-y-2.5">
                     {form.customProviders.map((prov) => {
                       const status = providerStatuses[prov.id];
                       return (
-                        <div key={prov.id} className="p-3.5 bg-background/70 border border-purple-900/30 rounded-2xl space-y-2.5">
+                        <div key={prov.id} className="p-3 bg-[#0a0d13] border border-[#1e2535] rounded-xl space-y-2">
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                             <input
                               type="text"
                               value={prov.name}
                               onChange={(e) => updateCustomProvider(prov.id, { name: e.target.value })}
-                              placeholder="Nome do Servidor (ex: LM Studio)"
-                              className="bg-surface border border-purple-900/40 rounded-xl px-2.5 py-1.5 text-xs text-white"
+                              placeholder="Nome do Servidor"
+                              className="bg-[#121620] border border-[#21293a] rounded px-2.5 py-1 text-xs text-white"
                             />
                             <input
                               type="text"
                               value={prov.baseUrl}
                               onChange={(e) => updateCustomProvider(prov.id, { baseUrl: e.target.value })}
-                              placeholder="URL Base (ex: http://localhost:1234/v1)"
-                              className="bg-surface border border-purple-900/40 rounded-xl px-2.5 py-1.5 text-xs text-white font-mono"
+                              placeholder="http://localhost:1234/v1"
+                              className="bg-[#121620] border border-[#21293a] rounded px-2.5 py-1 text-xs text-white font-mono"
                             />
                           </div>
 
@@ -377,36 +422,35 @@ export const SettingsModal: React.FC<Props> = ({
                               type="password"
                               value={prov.apiKey || ''}
                               onChange={(e) => updateCustomProvider(prov.id, { apiKey: e.target.value })}
-                              placeholder="API Key (opcional se for local)"
-                              className="flex-1 bg-surface border border-purple-900/40 rounded-xl px-2.5 py-1.5 text-xs text-white"
+                              placeholder="API Key (opcional)"
+                              className="flex-1 bg-[#121620] border border-[#21293a] rounded px-2.5 py-1 text-xs text-white"
                             />
 
                             <button
                               type="button"
                               onClick={() => handleTestProvider(prov)}
                               disabled={testingProviderId === prov.id}
-                              className="bg-surface hover:bg-surfaceHover text-purple-300 border border-purple-900/40 text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                              className="bg-[#161a25] hover:bg-[#202738] text-zinc-300 border border-[#263045] text-xs px-3 py-1 rounded transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
                             >
                               <RefreshCw size={12} className={testingProviderId === prov.id ? 'animate-spin' : ''} />
-                              <span>Testar & Sincronizar</span>
+                              <span>Testar</span>
                             </button>
 
                             <button
                               type="button"
                               onClick={() => removeCustomProvider(prov.id)}
-                              className="p-1.5 text-gray-500 hover:text-red-400 transition rounded-lg"
-                              title="Remover servidor"
+                              className="p-1.5 text-zinc-600 hover:text-rose-400 transition"
                             >
-                              <Trash2 size={14} />
+                              <Trash2 size={13} />
                             </button>
                           </div>
 
                           {status && (
-                            <div className={`p-2 rounded-xl text-[11px] font-mono flex items-center justify-between ${
-                              status.ok ? 'bg-emerald-950/40 text-emerald-300 border border-emerald-900/40' : 'bg-red-950/40 text-red-300 border border-red-900/40'
+                            <div className={`p-2 rounded text-[11px] font-mono flex items-center justify-between ${
+                              status.ok ? 'bg-emerald-950/30 text-emerald-300 border border-emerald-900/40' : 'bg-rose-950/30 text-rose-300 border border-rose-900/40'
                             }`}>
-                              <span>{status.ok ? `Conectado com sucesso (${status.latency}ms)` : `Erro: ${status.error}`}</span>
-                              <span>{prov.models.length} modelos encontrados</span>
+                              <span>{status.ok ? `Online (${status.latency}ms)` : `Erro: ${status.error}`}</span>
+                              <span>{prov.models.length} modelos listados</span>
                             </div>
                           )}
                         </div>
@@ -420,69 +464,96 @@ export const SettingsModal: React.FC<Props> = ({
 
           {activeTab === 'ollama' && (
             <div className="space-y-4">
-              <div className="p-4 bg-emerald-950/20 border border-emerald-900/40 rounded-2xl space-y-3">
+              {/* JANELA DE CONTEXTO DO OLLAMA (RESOLVE DEFINITIVAMENTE O ERRO 400) */}
+              <div className="p-3.5 bg-[#0a0f16] border border-[#1b2f26] rounded-xl space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <Cpu size={16} className="text-emerald-400" />
-                    <span className="text-xs font-bold text-emerald-300">Motor Ollama Local (GPU)</span>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setIsOllamaGuideOpen(true)}
-                      className="text-xs text-purple-300 hover:text-white flex items-center gap-1 p-1"
-                    >
-                      <HelpCircle size={14} />
-                      <span>Guia e Dicas</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={checkOllamaStatusQuick}
-                      disabled={checkingOllama}
-                      className="bg-emerald-950/80 text-emerald-300 hover:text-white border border-emerald-800/40 text-xs px-2.5 py-1 rounded-xl transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
-                    >
-                      <RefreshCw size={12} className={checkingOllama ? 'animate-spin' : ''} />
-                      <span>Verificar Status</span>
-                    </button>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between bg-background/60 p-3 rounded-xl border border-emerald-950/40 text-xs">
-                  <div className="flex items-center gap-2">
-                    {ollamaOnline ? <CheckCircle2 size={16} className="text-emerald-400" /> : <AlertCircle size={16} className="text-amber-400" />}
-                    <span className="font-semibold text-gray-200">
-                      {ollamaOnline ? 'Servidor Ollama Online e Ativo' : 'Servidor Offline'}
+                    <Maximize2 size={15} className="text-emerald-400" />
+                    <span className="text-xs font-semibold text-emerald-200 font-mono">
+                      Janela de Contexto Base (Tokens)
                     </span>
                   </div>
+                  <span className="text-xs font-mono text-emerald-300 font-bold">
+                    {form.ollamaContextLength || 32768} tokens
+                  </span>
+                </div>
+                <p className="text-[11px] text-zinc-400">
+                  Controla quantos tokens o Ollama pode processar. Seus arquivos somam mais de 10.000 tokens — mantendo em 32k ou 64k, o modelo lerá o projeto inteiro sem estourar a memória.
+                </p>
 
-                  {!ollamaOnline && (
+                <div className="flex gap-2 pt-1 font-mono text-xs">
+                  {[16384, 32768, 65536, 131072].map((tokens) => (
+                    <button
+                      key={tokens}
+                      type="button"
+                      onClick={() => setForm((prev) => ({ ...prev, ollamaContextLength: tokens }))}
+                      className={`flex-1 py-1 rounded transition border cursor-pointer ${
+                        (form.ollamaContextLength || 32768) === tokens
+                          ? 'bg-emerald-900/60 text-emerald-200 border-emerald-500/60 font-bold'
+                          : 'bg-[#10161f] text-zinc-400 border-[#1f2838] hover:text-white'
+                      }`}
+                    >
+                      {tokens >= 1000 ? `${tokens / 1024}k` : tokens}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Status do Motor */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="p-3 bg-[#0a0d13] border border-[#1c2232] rounded-xl flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Cpu size={16} className="text-emerald-400" />
+                    <div>
+                      <span className="text-xs font-bold text-zinc-200 block font-mono">Motor Local</span>
+                      <span className="text-[11px] font-mono text-zinc-400">
+                        {ollamaOnline ? 'Online (Pronto)' : 'Offline'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {!ollamaOnline ? (
                     <button
                       type="button"
                       onClick={handleStartOllama}
                       disabled={startingOllama}
-                      className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-3 py-1 rounded-lg text-xs transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-3 py-1 rounded text-xs transition cursor-pointer"
                     >
-                      <Play size={12} fill="currentColor" />
-                      <span>{startingOllama ? 'Iniciando...' : 'Iniciar Serviço'}</span>
+                      {startingOllama ? 'Iniciando...' : 'Iniciar'}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={checkOllamaStatusQuick}
+                      disabled={checkingOllama}
+                      className="bg-[#161a25] text-zinc-300 border border-[#242b3d] text-xs px-2.5 py-1 rounded transition"
+                    >
+                      <RefreshCw size={11} className={checkingOllama ? 'animate-spin' : ''} />
                     </button>
                   )}
                 </div>
+
+                <div className="p-3 bg-[#0a0d13] border border-[#1c2232] rounded-xl flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <HardDrive size={16} className="text-indigo-400" />
+                    <div>
+                      <span className="text-xs font-bold text-zinc-200 block font-mono">Espaço Ocupado</span>
+                      <span className="text-[11px] font-mono text-zinc-400">
+                        {localModelsList.length} modelos • {formatBytes(totalOllamaStorageBytes)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
               </div>
 
-              {/* BAIXAR DIRETO DO HUGGING FACE OU OLLAMA */}
-              <div className="p-4 bg-background/50 border border-purple-900/30 rounded-2xl space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-purple-200 flex items-center gap-1.5">
-                    <Download size={14} className="text-purple-400" />
-                    <span>Baixar Modelo Sem Censura (Hugging Face / Ollama)</span>
-                  </span>
-                  <span className="text-[10px] text-gray-400 font-mono">Suporta hf.co/...</span>
-                </div>
-
-                <p className="text-[11px] text-gray-400">
-                  Cole o identificador ou URL do Hugging Face (ex: <code>hf.co/OBLITERATUS/DeepSeek-V4.1-Flash-1017-obliterated</code>) ou tag do Ollama:
+              {/* Baixar Modelo Direto */}
+              <div className="p-3.5 bg-[#0a0d13] border border-[#1c2232] rounded-xl space-y-2.5">
+                <span className="text-xs font-bold text-zinc-200 flex items-center gap-1.5 font-mono">
+                  <Download size={13} className="text-indigo-400" />
+                  <span>Baixar Modelo do Hugging Face ou Ollama</span>
+                </span>
+                <p className="text-[11px] text-zinc-400">
+                  Cole direto o identificador (ex: <code>mradermacher/DeepSeek-R1-Distill-Qwen-14B-abliterated-v2-GGUF</code>):
                 </p>
 
                 <div className="flex gap-2">
@@ -490,269 +561,125 @@ export const SettingsModal: React.FC<Props> = ({
                     type="text"
                     value={pullModelTag}
                     onChange={(e) => setPullModelTag(e.target.value)}
-                    placeholder="ex: hf.co/OBLITERATUS/DeepSeek-V4.1-Flash-1017-obliterated"
-                    className="flex-1 bg-surface border border-purple-900/40 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-purple-500"
+                    placeholder="Cole autor/modelo..."
+                    className="flex-1 bg-[#121622] border border-[#21293a] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none"
                   />
                   <button
                     type="button"
                     onClick={() => handlePullModel()}
                     disabled={isPulling || !pullModelTag.trim()}
-                    className="bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs px-4 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    className="bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs px-3.5 py-1.5 rounded-lg transition cursor-pointer disabled:opacity-40"
                   >
-                    <Download size={14} />
-                    <span>{isPulling ? 'Baixando...' : 'Baixar Agora'}</span>
+                    <span>{isPulling ? 'Baixando...' : 'Baixar'}</span>
                   </button>
                 </div>
 
-                <div className="pt-2">
-                  <span className="text-[10px] text-gray-400 font-bold block mb-1.5 uppercase tracking-wider">
-                    Instalar Modelos Sem Censura / Livres com 1 Clique:
-                  </span>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      disabled={isPulling}
-                      onClick={() => handlePullModel('dolphin-mistral:latest')}
-                      className="px-2.5 py-1 bg-purple-950/60 hover:bg-purple-900/80 border border-purple-800/40 text-purple-200 text-xs rounded-lg transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
-                    >
-                      <Sparkles size={11} className="text-purple-400" />
-                      <span>Dolphin Mistral (Zero Censura)</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      disabled={isPulling}
-                      onClick={() => handlePullModel('qwen2.5-coder:7b')}
-                      className="px-2.5 py-1 bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-800/40 text-emerald-200 text-xs rounded-lg transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
-                    >
-                      <Cpu size={11} className="text-emerald-400" />
-                      <span>Qwen 2.5 Coder 7B (Especialista Código)</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      disabled={isPulling}
-                      onClick={() => handlePullModel('deepseek-r1:7b')}
-                      className="px-2.5 py-1 bg-cyan-950/60 hover:bg-cyan-900/80 border border-cyan-800/40 text-cyan-200 text-xs rounded-lg transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
-                    >
-                      <BrainCircuit size={11} className="text-cyan-400" />
-                      <span>DeepSeek R1 7B (Raciocínio Local)</span>
-                    </button>
-                  </div>
-                </div>
-
                 {isPulling && (
-                  <div className="p-3 bg-black/60 rounded-xl border border-purple-900/40 space-y-1.5 font-mono text-xs">
-                    <div className="flex justify-between text-purple-300 text-[11px]">
+                  <div className="p-2.5 bg-[#06080d] rounded-lg border border-[#1b2232] space-y-1 font-mono text-xs">
+                    <div className="flex justify-between text-zinc-400 text-[11px]">
                       <span>{pullStatus}</span>
                       <span>{pullProgress}%</span>
                     </div>
-                    <div className="w-full bg-surface rounded-full h-2 overflow-hidden border border-purple-900/30">
-                      <div
-                        className="bg-linear-to-r from-purple-500 to-emerald-400 h-full transition-all duration-300"
-                        style={{ width: `${pullProgress}%` }}
-                      />
+                    <div className="w-full bg-[#131722] h-1.5 rounded-full overflow-hidden">
+                      <div className="bg-emerald-400 h-full transition-all duration-200" style={{ width: `${pullProgress}%` }} />
                     </div>
                   </div>
                 )}
               </div>
 
-              {/* IMPORTAR ARQUIVO .GGUF JÁ BAIXADO NO COMPUTADOR */}
-              <div className="p-4 bg-background/50 border border-purple-900/30 rounded-2xl space-y-3">
+              {/* Lista e Exclusão de Modelos */}
+              <div className="p-3.5 bg-[#0a0d13] border border-[#1c2232] rounded-xl space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
-                    <FolderDown size={14} className="text-emerald-400" />
-                    <span>Importar Arquivo .GGUF do Computador</span>
-                  </span>
-                  <span className="text-[10px] text-gray-400">Para modelos que você já baixou</span>
+                  <span className="text-xs font-bold text-zinc-200 font-mono">Modelos Instalados</span>
+                  <span className="text-[11px] font-mono text-zinc-400">{formatBytes(totalOllamaStorageBytes)} total</span>
                 </div>
 
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={handleSelectGguf}
-                    className="bg-surface hover:bg-surfaceHover border border-emerald-900/40 text-emerald-200 text-xs px-3 py-2 rounded-xl transition cursor-pointer flex items-center gap-1.5"
-                  >
-                    <FolderDown size={14} />
-                    <span>Procurar arquivo .GGUF</span>
-                  </button>
-
-                  <input
-                    type="text"
-                    value={selectedGgufPath}
-                    readOnly
-                    placeholder="Nenhum arquivo .gguf selecionado..."
-                    className="flex-1 bg-surface border border-emerald-900/30 rounded-xl px-3 py-2 text-xs text-gray-300 font-mono truncate"
-                  />
+                <div className="space-y-1 max-h-40 overflow-y-auto">
+                  {localModelsList.map((m) => (
+                    <div key={m.name} className="flex items-center justify-between p-2 bg-[#121622] border border-[#1d2332] rounded-lg text-xs font-mono">
+                      <span className="text-zinc-300 truncate max-w-sm">{m.name}</span>
+                      <div className="flex items-center gap-2.5">
+                        <span className="text-[11px] text-zinc-400">{formatBytes(m.size)}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteModel(m.name)}
+                          className="text-zinc-600 hover:text-rose-400 p-0.5 transition"
+                          title="Excluir do disco"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-
-                {selectedGgufPath && (
-                  <div className="flex gap-2 pt-1 items-center">
-                    <span className="text-xs text-gray-300 font-mono shrink-0">Nome do Modelo:</span>
-                    <input
-                      type="text"
-                      value={ggufModelName}
-                      onChange={(e) => setGgufModelName(e.target.value)}
-                      placeholder="meu-modelo-sem-censura"
-                      className="flex-1 bg-surface border border-emerald-500/40 rounded-xl px-3 py-1.5 text-xs text-white font-mono focus:outline-none"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleImportGguf}
-                      disabled={isImportingGguf || !ggufModelName.trim()}
-                      className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs px-4 py-1.5 rounded-xl transition cursor-pointer disabled:opacity-50"
-                    >
-                      {isImportingGguf ? 'Criando no Ollama...' : 'Concluir Importação'}
-                    </button>
-                  </div>
-                )}
               </div>
             </div>
           )}
 
           {activeTab === 'params' && (
-            <div className="space-y-4">
-              <div className="p-4 bg-background/50 border border-purple-900/30 rounded-2xl space-y-3">
-                <div className="flex justify-between text-xs text-purple-300">
-                  <span className="font-semibold">Temperatura (Criatividade vs Precisão):</span>
-                  <span className="font-mono">{form.temperature ?? 0.7}</span>
+            <div className="p-3.5 bg-[#0a0d13] border border-[#1c2232] rounded-xl space-y-3 font-sans">
+              <div className="flex justify-between text-xs text-zinc-300 font-mono">
+                <span>Temperatura:</span>
+                <span>{form.temperature ?? 0.7}</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="2"
+                step="0.05"
+                value={form.temperature ?? 0.7}
+                onChange={(e) => setForm((prev) => ({ ...prev, temperature: parseFloat(e.target.value) }))}
+                className="w-full accent-indigo-500"
+              />
+
+              <div className="pt-2 flex items-center justify-between bg-[#121622] p-2.5 rounded-lg border border-[#1d2332]">
+                <div>
+                  <span className="text-xs font-medium text-zinc-200 block">Exigir Confirmação Antes de Gravar Arquivos</span>
+                  <span className="text-[10px] text-zinc-500">Mostra a revisão antes de aplicar alterações no disco.</span>
                 </div>
                 <input
-                  type="range"
-                  min="0"
-                  max="2"
-                  step="0.05"
-                  value={form.temperature ?? 0.7}
-                  onChange={(e) => setForm((prev) => ({ ...prev, temperature: parseFloat(e.target.value) }))}
-                  className="w-full accent-purple-500 cursor-pointer"
+                  type="checkbox"
+                  checked={form.requireActionConfirmation !== false}
+                  onChange={(e) => setForm((prev) => ({ ...prev, requireActionConfirmation: e.target.checked }))}
+                  className="accent-indigo-500 w-4 h-4 cursor-pointer"
                 />
-
-                <div className="grid grid-cols-2 gap-3 pt-2">
-                  <div>
-                    <label className="text-[11px] font-medium text-purple-300 mb-1 flex items-center gap-1">
-                      <BrainCircuit size={13} />
-                      <span>Nível de Pensamento (Thinking)</span>
-                    </label>
-                    <select
-                      value={form.thinkingLevel || 'off'}
-                      onChange={(e) => setForm((prev) => ({ ...prev, thinkingLevel: e.target.value as any }))}
-                      className="w-full bg-surface border border-purple-900/40 rounded-xl px-2.5 py-1.5 text-xs text-white"
-                    >
-                      <option value="off">Desativado (Rápido)</option>
-                      <option value="low">Baixo (1k tokens)</option>
-                      <option value="medium">Médio (2k tokens)</option>
-                      <option value="high">Alto (8k tokens)</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="text-[11px] font-medium text-purple-300 mb-1 flex items-center gap-1">
-                      <Image size={13} />
-                      <span>Resolução de Mídia (Imagens)</span>
-                    </label>
-                    <select
-                      value={form.mediaResolution || 'default'}
-                      onChange={(e) => setForm((prev) => ({ ...prev, mediaResolution: e.target.value as any }))}
-                      className="w-full bg-surface border border-purple-900/40 rounded-xl px-2.5 py-1.5 text-xs text-white"
-                    >
-                      <option value="default">Padrão</option>
-                      <option value="low">Econômico (Baixo Consumo)</option>
-                      <option value="high">Alto Detalhe</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="pt-2 flex items-center justify-between bg-surface/40 p-3 rounded-xl border border-purple-950/30">
-                  <div className="flex items-center gap-2">
-                    <ShieldCheck size={16} className="text-purple-400" />
-                    <div>
-                      <span className="text-xs font-semibold text-white block">Confirmar Ações do Agente</span>
-                      <span className="text-[10px] text-gray-400">Pede confirmação antes de gravar no disco ou rodar shell.</span>
-                    </div>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={form.requireActionConfirmation !== false}
-                    onChange={(e) => setForm((prev) => ({ ...prev, requireActionConfirmation: e.target.checked }))}
-                    className="accent-purple-500 w-4 h-4 cursor-pointer"
-                  />
-                </div>
-
-                <div className="pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setForm((prev) => ({ ...prev, googleSearch: !prev.googleSearch }))}
-                    className={`w-full py-2 px-3 rounded-xl border text-xs font-semibold transition flex items-center justify-center gap-2 cursor-pointer ${
-                      form.googleSearch
-                        ? 'bg-purple-950/80 text-purple-300 border-purple-500/50'
-                        : 'bg-surface text-gray-500 border-purple-900/30 hover:text-gray-300'
-                    }`}
-                  >
-                    <Globe size={13} />
-                    <span>{form.googleSearch ? 'Busca Web Google: ATIVA' : 'Busca Web Google: DESATIVADA'}</span>
-                  </button>
-                </div>
               </div>
             </div>
           )}
 
           {activeTab === 'keys' && (
-            <div className="space-y-3">
-              <div className="p-3 bg-violet-950/30 border border-violet-800/40 rounded-2xl">
-                <label className="block text-xs font-bold text-violet-300 mb-1">
-                  OpenRouter API Key (Hub Universal para centenas de modelos)
-                </label>
+            <div className="space-y-3 font-mono">
+              <div className="p-3 bg-[#0a0d13] border border-[#1c2232] rounded-xl">
+                <label className="block text-xs font-semibold text-zinc-300 mb-1">OpenRouter Key (Opcional)</label>
                 <input
                   type="password"
                   value={form.openrouterApiKey || ''}
                   onChange={(e) => setForm((prev) => ({ ...prev, openrouterApiKey: e.target.value }))}
                   placeholder="sk-or-v1-..."
-                  className="w-full bg-background border border-violet-900/50 rounded-xl px-3 py-2 text-xs text-white"
+                  className="w-full bg-[#121622] border border-[#21293a] rounded px-2.5 py-1 text-xs text-white focus:outline-none"
                 />
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="p-3 bg-background/50 border border-purple-900/30 rounded-2xl">
-                  <label className="block text-xs font-bold text-blue-300 mb-1">Google Gemini API Key</label>
+                <div className="p-3 bg-[#0a0d13] border border-[#1c2232] rounded-xl">
+                  <label className="block text-xs font-semibold text-zinc-300 mb-1">Gemini API Key</label>
                   <input
                     type="password"
                     value={form.geminiApiKey || ''}
                     onChange={(e) => setForm((prev) => ({ ...prev, geminiApiKey: e.target.value }))}
                     placeholder="AIzaSy..."
-                    className="w-full bg-surface border border-blue-900/40 rounded-xl px-3 py-2 text-xs text-white"
+                    className="w-full bg-[#121622] border border-[#21293a] rounded px-2.5 py-1 text-xs text-white focus:outline-none"
                   />
                 </div>
 
-                <div className="p-3 bg-background/50 border border-purple-900/30 rounded-2xl">
-                  <label className="block text-xs font-bold text-amber-300 mb-1">Anthropic Claude API Key</label>
-                  <input
-                    type="password"
-                    value={form.anthropicApiKey || ''}
-                    onChange={(e) => setForm((prev) => ({ ...prev, anthropicApiKey: e.target.value }))}
-                    placeholder="sk-ant-..."
-                    className="w-full bg-surface border border-amber-900/40 rounded-xl px-3 py-2 text-xs text-white"
-                  />
-                </div>
-
-                <div className="p-3 bg-background/50 border border-purple-900/30 rounded-2xl">
-                  <label className="block text-xs font-bold text-emerald-300 mb-1">OpenAI API Key</label>
-                  <input
-                    type="password"
-                    value={form.openaiApiKey || ''}
-                    onChange={(e) => setForm((prev) => ({ ...prev, openaiApiKey: e.target.value }))}
-                    placeholder="sk-proj-..."
-                    className="w-full bg-surface border border-emerald-900/40 rounded-xl px-3 py-2 text-xs text-white"
-                  />
-                </div>
-
-                <div className="p-3 bg-background/50 border border-purple-900/30 rounded-2xl">
-                  <label className="block text-xs font-bold text-cyan-300 mb-1">DeepSeek API Key</label>
+                <div className="p-3 bg-[#0a0d13] border border-[#1c2232] rounded-xl">
+                  <label className="block text-xs font-semibold text-zinc-300 mb-1">DeepSeek Cloud Key</label>
                   <input
                     type="password"
                     value={form.deepseekApiKey || ''}
                     onChange={(e) => setForm((prev) => ({ ...prev, deepseekApiKey: e.target.value }))}
                     placeholder="sk-..."
-                    className="w-full bg-surface border border-cyan-900/40 rounded-xl px-3 py-2 text-xs text-white"
+                    className="w-full bg-[#121622] border border-[#21293a] rounded px-2.5 py-1 text-xs text-white focus:outline-none"
                   />
                 </div>
               </div>
@@ -760,49 +687,34 @@ export const SettingsModal: React.FC<Props> = ({
           )}
 
           {activeTab === 'memory' && (
-            <div className="space-y-4">
-              <div className="p-4 bg-background/50 border border-purple-900/30 rounded-2xl space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-purple-200 flex items-center gap-1.5">
-                    <BookOpen size={14} className="text-purple-400" />
-                    <span>Memória Permanente do Desenvolvedor</span>
-                  </span>
-                  {form.globalMemory && (
-                    <button
-                      type="button"
-                      onClick={() => setForm((prev) => ({ ...prev, globalMemory: '' }))}
-                      className="text-gray-500 hover:text-red-400 p-1 transition"
-                      title="Limpar memória"
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  )}
-                </div>
+            <div className="space-y-3">
+              <div className="p-3.5 bg-[#0a0d13] border border-[#1c2232] rounded-xl space-y-2">
+                <span className="text-xs font-bold text-zinc-300 block font-mono">Memória Permanente</span>
                 <textarea
                   value={form.globalMemory || ''}
                   onChange={(e) => setForm((prev) => ({ ...prev, globalMemory: e.target.value }))}
-                  placeholder="Instruções permanentes, stacks favoritas (ex: Rust, React, TypeScript), padrões arquiteturais..."
-                  rows={6}
-                  className="w-full bg-surface border border-purple-900/40 rounded-xl p-3 text-xs text-purple-100 placeholder-gray-600 focus:outline-none resize-none font-mono"
+                  placeholder="Instruções permanentes de arquitetura para todas as IAs..."
+                  rows={5}
+                  className="w-full bg-[#121622] border border-[#21293a] rounded p-2 text-xs text-white font-mono focus:outline-none resize-none"
                 />
               </div>
 
-              <div className="p-4 bg-red-950/20 border border-red-900/40 rounded-2xl flex items-center justify-between">
+              <div className="p-3 bg-[#0a0d13] border border-[#1c2232] rounded-xl flex items-center justify-between">
                 <div>
-                  <span className="text-xs font-bold text-red-300 block">Limpeza Geral de Cache</span>
-                  <span className="text-[11px] text-gray-400">Apaga todo o histórico de conversas e anexos salvos no IndexedDB.</span>
+                  <span className="text-xs font-bold text-zinc-300 block">Banco de Dados Interno</span>
+                  <span className="text-[11px] font-mono text-zinc-500">Uso atual: {appCacheSize}</span>
                 </div>
                 <button
                   type="button"
                   onClick={async () => {
-                    if (confirm('Deseja limpar todos os chats antigos e histórico para liberar espaço no disco?')) {
+                    if (confirm('Limpar conversas antigas do disco?')) {
                       await db.messages.clear();
                       await db.chats.clear();
-                      alert('Cache limpo com sucesso!');
+                      alert('Cache limpo!');
                       window.location.reload();
                     }
                   }}
-                  className="bg-red-950/60 hover:bg-red-900 text-red-300 border border-red-800/50 text-xs font-semibold px-3 py-1.5 rounded-xl transition cursor-pointer"
+                  className="bg-[#181d2a] hover:bg-rose-950/60 text-zinc-300 hover:text-rose-300 text-xs px-3 py-1 rounded transition"
                 >
                   Limpar Histórico
                 </button>
@@ -811,14 +723,14 @@ export const SettingsModal: React.FC<Props> = ({
           )}
         </div>
 
-        <div className="pt-4 mt-3 border-t border-purple-950/40 flex items-center justify-between">
-          <span className="text-[11px] text-gray-500 font-mono">Esperto IDE Desktop • 2026</span>
+        <div className="pt-3 mt-3 border-t border-[#1c2232] flex items-center justify-between">
+          <span className="text-[11px] text-zinc-600 font-mono">Esperto IDE • 2026</span>
           <button
             type="button"
             onClick={handleSaveAndClose}
-            className="bg-linear-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white font-semibold px-7 py-2 rounded-xl transition text-xs shadow-md shadow-purple-950/50 cursor-pointer"
+            className="bg-zinc-200 hover:bg-white text-zinc-900 font-semibold px-6 py-1.5 rounded-lg transition text-xs font-mono cursor-pointer"
           >
-            Salvar Alterações
+            Salvar Preferências
           </button>
         </div>
       </div>

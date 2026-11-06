@@ -70,7 +70,7 @@ export async function* streamAIResponse({
     return;
   }
 
-  // 2. OLLAMA LOCAL (GPU Offline)
+  // 2. OLLAMA LOCAL (Com auto-escalonamento de tokens para não estourar)
   if (provider === 'ollama') {
     yield* streamOllama({
       model,
@@ -80,7 +80,9 @@ export async function* streamAIResponse({
       attachments,
       temperature: settings.temperature,
       topP: settings.topP,
+      contextLength: settings.ollamaContextLength || 32768,
       customHost: settings.ollamaHost,
+      customPath: settings.ollamaCustomPath,
       signal,
     });
     return;

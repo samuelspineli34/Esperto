@@ -14,14 +14,11 @@ import { checkForUpdates, ReleaseInfo } from './services/updater';
 import {
   Send,
   Sliders,
-  Eye,
   Brain,
-  Copy,
   Paperclip,
   X,
   FileText,
   Image as ImageIcon,
-  Activity,
   Square,
   Timer,
   Folder,
@@ -29,18 +26,14 @@ import {
   FolderSync,
   Plus,
   Trash2,
-  Download as ExportIcon,
   Bookmark,
   BookmarkPlus,
-  DollarSign,
-  Gift,
   Cpu,
   FolderSearch,
   ChevronDown,
-  FileCode2,
-  Wrench,
-  CheckSquare,
   Terminal,
+  FileCode2,
+  Layers,
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 
@@ -152,36 +145,8 @@ export default function App() {
     return Math.min(100, Math.round((totalEstimatedTokens / modelInfo.contextLimit) * 1000) / 10);
   }, [totalEstimatedTokens, modelInfo.contextLimit]);
 
-  const estimatedCostUSD = useMemo(() => {
-    if (modelInfo.pricing === 'free_tier' || modelInfo.isLocal) return 0;
-
-    let userChars = (settings.globalMemory || '').length + (systemInstruction || '').length;
-    let modelChars = 0;
-
-    messages.forEach((m) => {
-      if (m.role === 'user') {
-        userChars += m.content.length;
-        if (m.attachments) m.attachments.forEach((a) => (userChars += a.data.length * 0.1));
-      } else {
-        modelChars += m.content.length;
-      }
-    });
-
-    userChars += inputMessage.length;
-
-    const inputTokens = Math.ceil(userChars / 3.8);
-    const outputTokens = Math.ceil(modelChars / 3.8);
-
-    const inPrice = modelInfo.inputPrice || 2.5;
-    const outPrice = modelInfo.outputPrice || 10.0;
-
-    return (inputTokens / 1000000) * inPrice + (outputTokens / 1000000) * outPrice;
-  }, [messages, inputMessage, systemInstruction, settings.globalMemory, modelInfo]);
-
-  // Inicialização Automática e Silenciosa do Ollama ao Abrir o Esperto
   useEffect(() => {
     const initLocalModels = async () => {
-      // Sobe o serviço se estiver desligado
       await ensureOllamaRunning(settings.ollamaHost, settings.ollamaCustomPath);
       const res = await getInstalledOllamaModels(settings.ollamaHost, settings.ollamaCustomPath);
       if (res.models && res.models.length > 0) {
@@ -285,9 +250,9 @@ export default function App() {
     } catch (err: any) {
       setActiveError({
         title: 'Falha ao Selecionar Pasta',
-        context: 'Seletor Nativo do Sistema',
-        message: 'Não foi possível abrir o seletor de diretórios.',
-        technicalDetails: err?.toString() || 'Erro ao invocar select_folder',
+        context: 'Seletor Nativo',
+        message: 'Não foi possível abrir o explorador de pastas.',
+        technicalDetails: err?.toString() || 'Erro no select_folder',
       });
       return null;
     }
@@ -397,7 +362,7 @@ export default function App() {
   const createNewChat = async () => {
     const newChat: Chat = {
       id: crypto.randomUUID(),
-      title: 'Nova Consulta',
+      title: 'Sessão de Desenvolvimento',
       systemInstruction: '',
       directoryPaths: directoryPaths.length > 0 ? [...directoryPaths] : [],
       useMemory: true,
@@ -407,59 +372,6 @@ export default function App() {
     setChats((prev) => [newChat, ...prev]);
     setActiveChatId(newChat.id);
     setMessages([]);
-  };
-
-  const handleDuplicateChat = async (sourceChatId: string, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    const sourceChat = await db.chats.get(sourceChatId);
-    if (!sourceChat) return;
-
-    const newChatId = crypto.randomUUID();
-    const newChat: Chat = {
-      id: newChatId,
-      title: `${sourceChat.title} (Ramo)`,
-      systemInstruction: sourceChat.systemInstruction || '',
-      directoryPaths: sourceChat.directoryPaths || [],
-      useMemory: sourceChat.useMemory !== false,
-      model: sourceChat.model,
-      createdAt: Date.now(),
-    };
-
-    await db.chats.add(newChat);
-
-    const sourceMessages = await db.messages.where('chatId').equals(sourceChatId).sortBy('timestamp');
-
-    for (const msg of sourceMessages) {
-      await db.messages.add({
-        chatId: newChatId,
-        role: msg.role,
-        content: msg.content,
-        attachments: msg.attachments,
-        timestamp: msg.timestamp,
-      });
-    }
-
-    setChats((prev) => [newChat, ...prev]);
-    setActiveChatId(newChatId);
-  };
-
-  const handleRenameChat = async (id: string, newTitle: string) => {
-    await db.chats.update(id, { title: newTitle });
-    setChats((prev) => prev.map((c) => (c.id === id ? { ...c, title: newTitle } : c)));
-  };
-
-  const deleteChat = async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    await db.chats.delete(id);
-    await db.messages.where('chatId').equals(id).delete();
-
-    const updatedChats = chats.filter((c) => c.id !== id);
-    setChats(updatedChats);
-
-    if (activeChatId === id) {
-      if (updatedChats.length > 0) setActiveChatId(updatedChats[0].id);
-      else createNewChat();
-    }
   };
 
   const handleUpdateSystemInstruction = async (val: string) => {
@@ -496,7 +408,7 @@ export default function App() {
       setAttachments((prev) => [
         ...prev,
         {
-          name: `Trecho colado (${tokenCost} tokens)`,
+          name: `snippet-${tokenCost}t.txt`,
           mimeType: 'text/plain',
           data: btoa(unescape(encodeURIComponent(pastedText))),
           size: pastedText.length,
@@ -562,7 +474,7 @@ export default function App() {
         });
         setAllLoadedFiles(currentFiles);
       } catch (e) {
-        console.warn('Erro ao auto-sincronizar:', e);
+        console.warn('Auto-sync:', e);
       }
     }
 
@@ -587,7 +499,7 @@ export default function App() {
       setMessages(currentMessages);
 
       if (currentMessages.length === 1) {
-        const newTitle = currentInput.slice(0, 26) || currentAttachments[0]?.name || 'Consulta';
+        const newTitle = currentInput.slice(0, 24) || currentAttachments[0]?.name || 'Sessão';
         await db.chats.update(activeChatId, { title: newTitle });
         setChats((prev) =>
           prev.map((c) => (c.id === activeChatId ? { ...c, title: newTitle } : c))
@@ -642,7 +554,7 @@ export default function App() {
       }
     } catch (err: any) {
       if (!abortControllerRef.current?.signal.aborted) {
-        const errorMessage = `Erro: ${err.message || 'Falha na resposta do Esperto.'}`;
+        const errorMessage = `Erro: ${err.message || 'Falha ao processar solicitação.'}`;
         setMessages((prev) => {
           const updated = [...prev];
           updated[updated.length - 1] = {
@@ -660,9 +572,9 @@ export default function App() {
         });
 
         setActiveError({
-          title: 'Erro na Geração da Resposta',
-          context: `Modelo: ${activeModelId}`,
-          message: err.message || 'Não foi possível completar a transmissão da resposta.',
+          title: 'Erro na Inferência',
+          context: activeModelId,
+          message: err.message || 'Falha de comunicação com o motor de IA.',
           technicalDetails: err.stack || err.toString(),
         });
       }
@@ -697,25 +609,6 @@ export default function App() {
     }
   };
 
-  const handleExportMarkdown = () => {
-    if (messages.length === 0) return;
-    let md = `# Conversa: ${chats.find((c) => c.id === activeChatId)?.title || 'Esperto'}\n\n`;
-    md += `*Exportado em: ${new Date().toLocaleString('pt-BR')} via Esperto Desktop*\n\n---\n\n`;
-
-    messages.forEach((m) => {
-      const author = m.role === 'user' ? 'Usuário' : 'Esperto';
-      md += `### ${author}\n\n${m.content}\n\n---\n\n`;
-    });
-
-    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `conversa-${activeChatId || 'esperto'}.md`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
   const handleSaveSettings = async (newSettings: Settings) => {
     setSettings(newSettings);
     registerCustomProviderModels(newSettings.customProviders || []);
@@ -737,339 +630,281 @@ export default function App() {
         activeChatId={activeChatId}
         onSelectChat={setActiveChatId}
         onNewChat={createNewChat}
-        onDuplicateChat={handleDuplicateChat}
-        onRenameChat={handleRenameChat}
-        onDeleteChat={deleteChat}
+        onDuplicateChat={async (id) => {
+          const s = await db.chats.get(id);
+          if (!s) return;
+          const nId = crypto.randomUUID();
+          const nChat: Chat = {
+            ...s,
+            id: nId,
+            title: `${s.title} (fork)`,
+            createdAt: Date.now(),
+          };
+          await db.chats.add(nChat);
+          setChats((prev) => [nChat, ...prev]);
+          setActiveChatId(nId);
+        }}
+        onRenameChat={async (id, title) => {
+          await db.chats.update(id, { title });
+          setChats((prev) => prev.map((c) => (c.id === id ? { ...c, title } : c)));
+        }}
+        onDeleteChat={async (id, e) => {
+          e.stopPropagation();
+          await db.chats.delete(id);
+          await db.messages.where('chatId').equals(id).delete();
+          const updated = chats.filter((c) => c.id !== id);
+          setChats(updated);
+          if (activeChatId === id) {
+            if (updated.length > 0) setActiveChatId(updated[0].id);
+            else createNewChat();
+          }
+        }}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenHelp={() => setIsHelpOpen(true)}
         onCheckUpdate={() => handleCheckUpdate(true)}
       />
 
-      <main className="flex-1 flex flex-col h-full overflow-hidden relative">
+      <main className="flex-1 flex flex-col h-full overflow-hidden relative bg-background">
+        {/* Barra Superior estilo IDE Workspace Header */}
         <header
           data-tauri-drag-region
-          className="h-14 border-b border-purple-950/30 flex items-center justify-between px-6 bg-background backdrop-blur-sm select-none"
+          className="h-13 border-b border-[#161a25] flex items-center justify-between px-4 bg-[#0a0d13] select-none"
         >
           <div className="flex items-center gap-3">
-            <Eye size={18} className="text-purple-400 animate-pulse" />
-            <span className="font-bold text-xs tracking-widest bg-linear-to-r from-purple-400 to-indigo-300 bg-clip-text text-transparent uppercase font-mono">
-              ESPERTO
-            </span>
-
-            <div className="relative group">
-              <button
-                onClick={() => setIsSettingsOpen(true)}
-                className="text-[11px] font-medium bg-surface hover:bg-surfaceHover text-purple-200 px-3 py-1 rounded-lg border border-purple-900/40 transition cursor-pointer flex items-center gap-2 shadow-sm"
-              >
-                {modelInfo.isLocal && <Cpu size={12} className="text-emerald-400 animate-pulse" />}
-                <span className="truncate max-w-36 font-semibold">{modelInfo.name}</span>
-
-                {isChatModelOverridden ? (
-                  <span className="bg-purple-950 text-purple-300 text-[9px] px-1.5 py-0.5 rounded font-mono font-semibold border border-purple-800/40">
-                    CHAT
-                  </span>
-                ) : (
-                  <span className="bg-background text-gray-400 text-[9px] px-1.5 py-0.5 rounded font-mono border border-purple-900/30">
-                    GLOBAL
-                  </span>
-                )}
-                <ChevronDown size={12} className="text-gray-400" />
-              </button>
-            </div>
-
-            <div
-              title={`Contexto: ${totalEstimatedTokens.toLocaleString()} de ${(modelInfo.contextLimit / 1000).toFixed(0)}k tokens`}
-              className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-surface border border-purple-900/30 text-[10px] font-mono text-purple-300"
+            {/* Seletor de Modelo Compacto com LED Indicator */}
+            <button
+              onClick={() => setIsSettingsOpen(true)}
+              className="h-8 px-2.5 rounded bg-panel hover:bg-[#1a202f] border border-[#232a3d] text-xs font-mono flex items-center gap-2 transition text-zinc-200 cursor-pointer"
             >
-              <Activity size={12} className={tokenUsagePercent > 80 ? 'text-red-400' : 'text-purple-400'} />
-              <span>{totalEstimatedTokens > 1000 ? `${(totalEstimatedTokens / 1000).toFixed(1)}k` : totalEstimatedTokens}</span>
-              <span className="text-gray-600">/</span>
-              <span className="text-gray-400">
-                {modelInfo.contextLimit >= 1000000 ? '1.0M' : `${modelInfo.contextLimit / 1000}k`}
+              <div
+                className={`w-2 h-2 rounded-full ${
+                  modelInfo.isLocal ? 'bg-emerald-400' : 'bg-indigo-400'
+                }`}
+              />
+              <span className="font-medium truncate max-w-40">{modelInfo.name}</span>
+              <span className="text-[10px] text-zinc-500 uppercase">
+                {isChatModelOverridden ? 'chat' : 'global'}
               </span>
-              <span className="font-bold ml-0.5">({tokenUsagePercent}%)</span>
-            </div>
+              <ChevronDown size={11} className="text-zinc-500" />
+            </button>
 
-            {modelInfo.isLocal ? (
-              <div
-                title="Executando offline localmente na GPU."
-                className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-surface border border-emerald-900/40 text-[10px] font-mono text-emerald-300 shadow-sm"
-              >
-                <Cpu size={12} className="text-emerald-400" />
-                <span>GPU Local</span>
-              </div>
-            ) : modelInfo.pricing === 'paid_only' ? (
-              <div
-                title={`Custo estimado da conversa atual (${modelInfo.name})`}
-                className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-surface border border-amber-900/40 text-[10px] font-mono text-amber-300 shadow-sm"
-              >
-                <DollarSign size={12} className="text-amber-400" />
-                <span>Custo:</span>
-                <span className="font-bold text-amber-200">
-                  {estimatedCostUSD < 0.0001 ? '<$0.0001' : `$${estimatedCostUSD.toFixed(4)}`}
-                </span>
-              </div>
-            ) : (
-              <div
-                title="Cota Gratuita."
-                className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-surface border border-emerald-900/30 text-[10px] font-mono text-emerald-300 shadow-sm"
-              >
-                <Gift size={12} className="text-emerald-400" />
-                <span>Cota Gratuita</span>
-              </div>
-            )}
+            {/* Medidor de Contexto Estilo Hardware Monitor */}
+            <div
+              title={`Contexto: ${totalEstimatedTokens.toLocaleString()} de ${(modelInfo.contextLimit / 1000).toFixed(0)}k`}
+              className="hidden md:flex items-center gap-1.5 h-8 px-2.5 rounded bg-surface border border-[#1d2332] text-[11px] font-mono text-zinc-400"
+            >
+              <span className="text-zinc-500">CTX</span>
+              <span className="text-zinc-200">
+                {totalEstimatedTokens > 1000 ? `${(totalEstimatedTokens / 1000).toFixed(1)}k` : totalEstimatedTokens}
+              </span>
+              <span className="text-zinc-600">/</span>
+              <span className="text-zinc-500">
+                {modelInfo.contextLimit >= 1000000 ? '1M' : `${modelInfo.contextLimit / 1000}k`}
+              </span>
+            </div>
 
             {isLoading && (
-              <div className="flex items-center gap-1 text-[11px] font-mono text-purple-300 bg-purple-950/70 border border-purple-500/40 px-2.5 py-1 rounded-lg animate-pulse">
-                <Timer size={12} />
+              <div className="flex items-center gap-1.5 h-8 px-2.5 rounded bg-[#121824] border border-indigo-900/40 text-[11px] font-mono text-indigo-300 animate-pulse">
+                <Timer size={11} />
                 <span>{elapsedTime.toFixed(1)}s</span>
               </div>
             )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <button
               onClick={toggleMemory}
-              title={useMemory ? 'Memória de todo o chat ATIVA' : 'Memória do chat DESATIVADA'}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition border cursor-pointer ${
+              title={useMemory ? 'Memória Global Ativa' : 'Memória Desativada'}
+              className={`h-8 px-2.5 rounded text-xs font-mono transition flex items-center gap-1.5 border cursor-pointer ${
                 useMemory
-                  ? 'bg-purple-950/60 text-purple-300 border-purple-500/40'
-                  : 'bg-surface text-gray-500 border-gray-800 hover:text-gray-300'
+                  ? 'bg-[#141a27] text-zinc-200 border-[#26334f]'
+                  : 'bg-[#0d1017] text-zinc-500 border-[#1a202c] hover:text-zinc-400'
               }`}
             >
-              <Brain size={14} className={useMemory ? 'text-purple-400' : ''} />
-              <span>{useMemory ? 'Memória: Ativa' : 'Memória: Inativa'}</span>
+              <Brain size={12} className={useMemory ? 'text-indigo-400' : ''} />
+              <span>{useMemory ? 'MEM_ON' : 'MEM_OFF'}</span>
             </button>
-
-            {activeChatId && (
-              <button
-                onClick={() => handleDuplicateChat(activeChatId)}
-                title="Ramificar esta conversa"
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-medium text-gray-400 hover:text-purple-200 bg-surface border border-purple-950/30 hover:bg-surfaceHover transition cursor-pointer"
-              >
-                <Copy size={13} />
-                <span>Duplicar</span>
-              </button>
-            )}
 
             <button
               onClick={() => setShowSystemPrompt(!showSystemPrompt)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition border cursor-pointer ${
+              className={`h-8 px-2.5 rounded text-xs font-mono transition flex items-center gap-1.5 border cursor-pointer ${
                 showSystemPrompt || systemInstruction
-                  ? 'bg-purple-600/20 text-purple-300 border-purple-500/30'
-                  : 'text-gray-400 hover:text-white bg-surface border-purple-950/30'
+                  ? 'bg-[#141a27] text-zinc-200 border-[#26334f]'
+                  : 'bg-[#0d1017] text-zinc-500 border-[#1a202c] hover:text-zinc-300'
               }`}
             >
-              <Sliders size={14} />
-              <span>{systemInstruction ? 'Instruções Ativas' : 'Instruções'}</span>
+              <Sliders size={12} />
+              <span>REGRAS</span>
             </button>
 
             <button
               onClick={() => setShowDirectoryDrawer(!showDirectoryDrawer)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition border cursor-pointer ${
+              className={`h-8 px-2.5 rounded text-xs font-mono transition flex items-center gap-1.5 border cursor-pointer ${
                 directoryPaths.length > 0
-                  ? 'bg-purple-950/80 text-purple-300 border-purple-500/50 shadow-sm'
-                  : 'text-gray-400 hover:text-white bg-surface border-purple-950/30'
+                  ? 'bg-[#111e19] text-emerald-300 border-[#1f3d30]'
+                  : 'bg-[#0d1017] text-zinc-500 border-[#1a202c] hover:text-zinc-300'
               }`}
-              title="Vincular pastas locais de código"
+              title="Vincular Workspace de Código"
             >
               {directoryPaths.length > 0 ? (
-                <FolderCheck size={14} className="text-purple-400" />
+                <FolderCheck size={12} className="text-emerald-400" />
               ) : (
-                <Folder size={14} />
+                <Folder size={12} />
               )}
               <span>
                 {directoryPaths.length > 0
-                  ? `${directoryPaths.length} Pastas (${allLoadedFiles.length} arqs)`
-                  : 'Pastas Base'}
+                  ? `${directoryPaths.length} PASTAS (${allLoadedFiles.length})`
+                  : 'WORKSPACE'}
               </span>
             </button>
-
-            {messages.length > 0 && (
-              <button
-                onClick={handleExportMarkdown}
-                title="Exportar conversa em Markdown (.md)"
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-medium text-gray-400 hover:text-purple-200 bg-surface border border-purple-950/30 hover:bg-surfaceHover transition cursor-pointer"
-              >
-                <ExportIcon size={13} />
-                <span>Exportar</span>
-              </button>
-            )}
           </div>
         </header>
 
+        {/* Drawer de Pastas do Projeto */}
         {showDirectoryDrawer && (
-          <div className="p-4 bg-surface border-b border-purple-950/40 transition space-y-4 shadow-xl">
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-bold text-purple-200 flex items-center gap-1.5">
-                  <Bookmark size={14} className="text-purple-400" />
-                  <span>Projetos Salvos (Workspaces em 1 Clique)</span>
-                </span>
+          <div className="p-4 bg-[#0d1018] border-b border-[#1a2130] transition space-y-3 font-sans">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-mono text-zinc-400 uppercase tracking-wider font-semibold flex items-center gap-1.5">
+                <Layers size={13} className="text-indigo-400" />
+                <span>Workspaces do Desenvolvedor</span>
+              </span>
 
-                <button
-                  onClick={() => setIsCreatingPreset(!isCreatingPreset)}
-                  disabled={directoryPaths.length === 0}
-                  className="text-[11px] text-purple-300 hover:text-purple-200 disabled:opacity-40 flex items-center gap-1 transition cursor-pointer"
-                >
-                  <BookmarkPlus size={13} />
-                  <span>Salvar pastas atuais como projeto</span>
-                </button>
-              </div>
-
-              {isCreatingPreset && (
-                <div className="flex gap-2 p-2.5 mb-2.5 bg-background border border-purple-500/40 rounded-xl animate-in fade-in duration-150">
-                  <input
-                    type="text"
-                    value={newPresetName}
-                    onChange={(e) => setNewPresetName(e.target.value)}
-                    placeholder="Nome do projeto (ex: Meu App Fullstack, Backend API)"
-                    className="flex-1 bg-surface border border-purple-900/40 rounded-lg px-2.5 py-1 text-xs text-white focus:outline-none focus:border-purple-500"
-                  />
-                  <button
-                    onClick={handleSaveAsPreset}
-                    disabled={!newPresetName.trim()}
-                    className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-xs font-semibold px-3 py-1 rounded-lg transition cursor-pointer"
-                  >
-                    Salvar
-                  </button>
-                </div>
-              )}
-
-              {presets.length === 0 ? (
-                <p className="text-[11px] text-gray-500">
-                  Nenhum projeto salvo. Adicione pastas abaixo para salvar seu primeiro workspace.
-                </p>
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  {presets.map((preset) => {
-                    const isFullyLoaded =
-                      preset.paths.every((p) => directoryPaths.includes(p)) &&
-                      preset.paths.length === directoryPaths.length;
-                    return (
-                      <div
-                        key={preset.id}
-                        onClick={() => handleApplyPreset(preset)}
-                        className={`group px-3 py-1.5 rounded-xl border text-xs font-medium transition flex items-center gap-2 cursor-pointer ${
-                          isFullyLoaded
-                            ? 'bg-purple-950/90 text-purple-200 border-purple-500 shadow-sm'
-                            : 'bg-background hover:bg-surfaceHover text-gray-300 border-purple-900/40'
-                        }`}
-                      >
-                        <span className="font-semibold">{preset.name}</span>
-                        <span className="text-[10px] text-purple-400 font-mono">
-                          ({preset.paths.length} pastas)
-                        </span>
-                        <button
-                          onClick={(e) => handleDeletePreset(preset.id, e)}
-                          className="text-gray-500 hover:text-red-400 transition p-0.5 opacity-0 group-hover:opacity-100"
-                          title="Excluir predefinição"
-                        >
-                          <X size={12} />
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+              <button
+                onClick={() => setIsCreatingPreset(!isCreatingPreset)}
+                disabled={directoryPaths.length === 0}
+                className="text-[11px] text-zinc-400 hover:text-zinc-200 disabled:opacity-40 flex items-center gap-1 font-mono transition cursor-pointer"
+              >
+                <BookmarkPlus size={12} />
+                <span>Salvar preset</span>
+              </button>
             </div>
 
-            <div className="pt-2 border-t border-purple-950/30 space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-semibold text-purple-200">
-                  Pastas Vinculadas a este Chat:
-                </label>
-                <span className="text-[11px] text-purple-300 font-mono">
-                  {allLoadedFiles.length} arquivos indexados
-                </span>
-              </div>
-
-              {directoryPaths.length > 0 && (
-                <div className="space-y-1 max-h-28 overflow-y-auto">
-                  {directoryPaths.map((path, idx) => (
-                    <div
-                      key={idx}
-                      className="flex items-center justify-between bg-background border border-purple-900/30 px-3 py-1 rounded-xl text-xs text-purple-200 font-mono"
-                    >
-                      <span className="truncate flex-1 mr-2">{path}</span>
-                      <button
-                        onClick={() => handleRemoveDirectory(path)}
-                        className="text-gray-500 hover:text-red-400 transition p-1"
-                        title="Remover pasta"
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div className="flex gap-2 pt-1">
-                <button
-                  onClick={handleBrowseFolder}
-                  className="bg-purple-950/80 hover:bg-purple-900 border border-purple-500/40 text-purple-300 hover:text-white px-3 py-1.5 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer shadow-sm"
-                  title="Abrir o explorador de arquivos"
-                >
-                  <FolderSearch size={14} className="text-purple-400" />
-                  <span>Procurar Pasta</span>
-                </button>
-
+            {isCreatingPreset && (
+              <div className="flex gap-2 p-2 bg-[#080a0f] border border-[#212a3d] rounded-lg">
                 <input
                   type="text"
-                  value={newDirPath}
-                  onChange={(e) => setNewDirPath(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleAddDirectory()}
-                  placeholder="Ou cole o caminho da pasta..."
-                  className="flex-1 bg-background border border-purple-900/40 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-purple-500 font-mono"
+                  value={newPresetName}
+                  onChange={(e) => setNewPresetName(e.target.value)}
+                  placeholder="Nome do Workspace (ex: API Backend, Frontend Vite)"
+                  className="flex-1 bg-[#10141d] border border-[#202738] rounded px-2.5 py-1 text-xs text-white focus:outline-none"
                 />
                 <button
-                  onClick={handleAddDirectory}
-                  disabled={!newDirPath.trim()}
-                  className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-xs font-semibold px-3.5 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                  onClick={handleSaveAsPreset}
+                  disabled={!newPresetName.trim()}
+                  className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-medium px-3 py-1 rounded transition cursor-pointer"
                 >
-                  <Plus size={14} />
-                  <span>Adicionar</span>
-                </button>
-                <button
-                  onClick={() => syncDirectories(directoryPaths)}
-                  disabled={loadingDirectories || directoryPaths.length === 0}
-                  className="bg-surface hover:bg-surfaceHover text-purple-300 border border-purple-900/40 text-xs font-semibold px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer"
-                >
-                  <FolderSync size={14} className={loadingDirectories ? 'animate-spin' : ''} />
-                  <span>Recarregar</span>
+                  Salvar
                 </button>
               </div>
+            )}
+
+            {presets.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {presets.map((preset) => (
+                  <div
+                    key={preset.id}
+                    onClick={() => handleApplyPreset(preset)}
+                    className="px-2.5 py-1 rounded bg-panel hover:bg-[#1a202f] border border-[#202738] text-xs font-mono text-zinc-300 flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <span>{preset.name}</span>
+                    <span className="text-[10px] text-zinc-500">({preset.paths.length})</span>
+                    <button
+                      onClick={(e) => handleDeletePreset(preset.id, e)}
+                      className="text-zinc-600 hover:text-rose-400 transition"
+                    >
+                      <X size={11} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {directoryPaths.length > 0 && (
+              <div className="space-y-1 max-h-24 overflow-y-auto">
+                {directoryPaths.map((path, idx) => (
+                  <div
+                    key={idx}
+                    className="flex items-center justify-between bg-[#080a0f] border border-[#1b2230] px-2.5 py-1 rounded text-xs text-zinc-300 font-mono"
+                  >
+                    <span className="truncate flex-1 mr-2">{path}</span>
+                    <button
+                      onClick={() => handleRemoveDirectory(path)}
+                      className="text-zinc-600 hover:text-rose-400 transition p-0.5"
+                    >
+                      <Trash2 size={11} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={handleBrowseFolder}
+                className="bg-[#141824] hover:bg-[#1c2233] border border-[#263047] text-zinc-300 text-xs px-3 py-1.5 rounded transition flex items-center gap-1.5 cursor-pointer font-mono"
+              >
+                <FolderSearch size={13} className="text-zinc-400" />
+                <span>Explorar Pasta</span>
+              </button>
+
+              <input
+                type="text"
+                value={newDirPath}
+                onChange={(e) => setNewDirPath(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleAddDirectory()}
+                placeholder="Caminho absoluto da pasta do projeto..."
+                className="flex-1 bg-[#080a0f] border border-[#1e2535] rounded px-3 py-1.5 text-xs text-white focus:outline-none font-mono"
+              />
+              <button
+                onClick={handleAddDirectory}
+                disabled={!newDirPath.trim()}
+                className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs px-3 py-1.5 rounded transition cursor-pointer"
+              >
+                <Plus size={13} />
+              </button>
+              <button
+                onClick={() => syncDirectories(directoryPaths)}
+                disabled={loadingDirectories || directoryPaths.length === 0}
+                className="bg-[#141824] hover:bg-[#1c2233] text-zinc-300 border border-[#263047] text-xs px-3 py-1.5 rounded transition cursor-pointer"
+              >
+                <FolderSync size={13} className={loadingDirectories ? 'animate-spin' : ''} />
+              </button>
             </div>
           </div>
         )}
 
         {showSystemPrompt && (
-          <div className="p-4 bg-surface border-b border-purple-950/40 transition">
-            <label className="block text-xs font-medium text-purple-300 mb-1">
-              Instruções Ocultas deste Chat (Persona / System Prompt):
+          <div className="p-3 bg-[#0d1018] border-b border-[#1a2130]">
+            <label className="block text-[11px] font-mono text-zinc-400 uppercase tracking-wider mb-1 font-semibold">
+              System Instruction / Persona da Sessão
             </label>
             <textarea
               rows={2}
               value={systemInstruction}
               onChange={(e) => handleUpdateSystemInstruction(e.target.value)}
-              placeholder="Ex: Aja como um arquiteto especialista em Rust e TypeScript..."
-              className="w-full bg-background border border-purple-900/40 rounded-xl p-2.5 text-xs text-white focus:outline-none focus:border-purple-500 resize-none font-mono"
+              placeholder="Instruções de arquitetura de software para este chat..."
+              className="w-full bg-[#080a0f] border border-[#1e2535] rounded p-2 text-xs text-zinc-200 focus:outline-none resize-none font-mono"
             />
           </div>
         )}
 
+        {/* Linha do Tempo de Mensagens */}
         <div ref={chatContainerRef} className="flex-1 overflow-y-auto">
           {messages.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center p-6 text-purple-300/60 select-none max-w-2xl mx-auto">
-              <div className="w-16 h-16 rounded-2xl bg-purple-950/30 border border-purple-500/20 flex items-center justify-center mb-4 shadow-xl shadow-purple-950/30">
-                <Eye size={36} className="text-purple-400 animate-pulse" />
+            <div className="h-full flex flex-col items-center justify-center p-6 text-zinc-500 select-none max-w-xl mx-auto">
+              {/* Launcher / Empty State estilo Terminal / Raycast */}
+              <div className="w-10 h-10 rounded-lg bg-[#11151f] border border-[#22293b] flex items-center justify-center mb-3 text-zinc-400">
+                <Terminal size={20} strokeWidth={2} />
               </div>
-              <h2 className="text-base font-bold text-white mb-1">Esperto • Engenheiro de Software Autônomo</h2>
-              <p className="text-xs text-gray-400 mb-6 text-center">
-                Crie, inspecione e refatore código diretamente no disco através de ações nativas.
+
+              <h2 className="text-sm font-semibold text-zinc-200 mb-1 font-mono uppercase tracking-wider">
+                Esperto Code Agent
+              </h2>
+              <p className="text-xs text-zinc-500 mb-6 text-center font-sans">
+                Agente autônomo com acesso a arquivos locais, execução de shell e inspeção de código.
               </p>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full">
+              <div className="grid grid-cols-1 gap-1.5 w-full font-mono text-xs">
                 <button
                   type="button"
                   onClick={() =>
@@ -1077,15 +912,13 @@ export default function App() {
                       'Crie um script utilitário em TypeScript na pasta src/lib chamado formatters.ts com funções úteis.'
                     )
                   }
-                  className="p-3 bg-surface/50 hover:bg-surface border border-purple-900/30 hover:border-purple-500/50 rounded-xl text-left transition cursor-pointer group"
+                  className="px-3 py-2 bg-[#0e1118] hover:bg-[#141924] border border-[#1b2232] hover:border-[#2e3952] rounded-md text-left transition cursor-pointer flex items-center justify-between text-zinc-300"
                 >
-                  <div className="flex items-center gap-2 mb-1">
-                    <FileCode2 size={15} className="text-purple-400" />
-                    <span className="text-xs font-semibold text-purple-200 group-hover:text-white">
-                      Criar Arquivo no Projeto
-                    </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-zinc-500">$</span>
+                    <span>esperto --create-file formatters.ts</span>
                   </div>
-                  <span className="text-[11px] text-gray-500">O Agente gera o código e grava diretamente no disco.</span>
+                  <span className="text-[10px] text-zinc-600">novo arquivo</span>
                 </button>
 
                 <button
@@ -1095,15 +928,13 @@ export default function App() {
                       'Analise os arquivos do projeto e refatore a estrutura para melhorar a performance.'
                     )
                   }
-                  className="p-3 bg-surface/50 hover:bg-surface border border-purple-900/30 hover:border-purple-500/50 rounded-xl text-left transition cursor-pointer group"
+                  className="px-3 py-2 bg-[#0e1118] hover:bg-[#141924] border border-[#1b2232] hover:border-[#2e3952] rounded-md text-left transition cursor-pointer flex items-center justify-between text-zinc-300"
                 >
-                  <div className="flex items-center gap-2 mb-1">
-                    <Wrench size={15} className="text-purple-400" />
-                    <span className="text-xs font-semibold text-purple-200 group-hover:text-white">
-                      Refatorar Código Existente
-                    </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-zinc-500">$</span>
+                    <span>esperto --audit-codebase</span>
                   </div>
-                  <span className="text-[11px] text-gray-500">Identifica melhorias e gera modificações prontas.</span>
+                  <span className="text-[10px] text-zinc-600">refatoração</span>
                 </button>
 
                 <button
@@ -1111,31 +942,13 @@ export default function App() {
                   onClick={() =>
                     handleSendMessage('Crie um teste unitário completo para a lógica principal do app.')
                   }
-                  className="p-3 bg-surface/50 hover:bg-surface border border-purple-900/30 hover:border-purple-500/50 rounded-xl text-left transition cursor-pointer group"
+                  className="px-3 py-2 bg-[#0e1118] hover:bg-[#141924] border border-[#1b2232] hover:border-[#2e3952] rounded-md text-left transition cursor-pointer flex items-center justify-between text-zinc-300"
                 >
-                  <div className="flex items-center gap-2 mb-1">
-                    <CheckSquare size={15} className="text-purple-400" />
-                    <span className="text-xs font-semibold text-purple-200 group-hover:text-white">
-                      Gerar Testes Automatizados
-                    </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-zinc-500">$</span>
+                    <span>esperto --generate-tests</span>
                   </div>
-                  <span className="text-[11px] text-gray-500">Cria arquivos de teste na estrutura do workspace.</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() =>
-                    handleSendMessage('Como posso compilar e verificar erros deste projeto via terminal?')
-                  }
-                  className="p-3 bg-surface/50 hover:bg-surface border border-purple-900/30 hover:border-purple-500/50 rounded-xl text-left transition cursor-pointer group"
-                >
-                  <div className="flex items-center gap-2 mb-1">
-                    <Terminal size={15} className="text-purple-400" />
-                    <span className="text-xs font-semibold text-purple-200 group-hover:text-white">
-                      Executar Comandos de Terminal
-                    </span>
-                  </div>
-                  <span className="text-[11px] text-gray-500">Executa builds, testes e comandos do ambiente.</span>
+                  <span className="text-[10px] text-zinc-600">testes</span>
                 </button>
               </div>
             </div>
@@ -1158,52 +971,56 @@ export default function App() {
           )}
 
           {isLoading && messages[messages.length - 1]?.content === '' && (
-            <div className="flex items-center gap-3 p-5 text-purple-300 bg-surface/30 border-y border-purple-950/20">
-              <div className="w-8 h-8 rounded-xl bg-purple-950 border border-purple-500/30 flex items-center justify-center animate-pulse">
-                <Eye size={18} className="text-purple-400" />
-              </div>
-              <div className="flex items-center gap-2 text-xs font-mono">
-                <span className="animate-pulse">Processando resposta e ações...</span>
-                <span className="text-purple-400 font-bold">({elapsedTime.toFixed(1)}s)</span>
+            <div className="px-6 py-4 border-b border-panel bg-[#090c12]">
+              <div className="max-w-4xl mx-auto flex gap-3.5 items-center">
+                <span className="font-mono text-[11px] font-semibold tracking-wider text-indigo-400 uppercase w-16 shrink-0">
+                  Esperto
+                </span>
+                <div className="flex items-center gap-2 text-xs font-mono text-zinc-400">
+                  <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-ping" />
+                  <span>inferindo tokens...</span>
+                  <span className="text-zinc-600">({elapsedTime.toFixed(1)}s)</span>
+                </div>
               </div>
             </div>
           )}
         </div>
 
-        <div className="p-4 bg-surface/40 border-t border-purple-950/30">
+        {/* Input Bar Estilo Prompt de IDE / Editor de Comando */}
+        <div className="p-3 bg-[#0a0d14] border-t border-[#161a25]">
           <form
             onSubmit={(e) => {
               e.preventDefault();
               handleSendMessage();
             }}
-            className="max-w-4xl mx-auto flex flex-col gap-2"
+            className="max-w-4xl mx-auto flex flex-col gap-1.5"
           >
             {attachments.length > 0 && (
-              <div className="flex flex-wrap gap-2 p-2 bg-surface/80 rounded-xl border border-purple-900/40">
+              <div className="flex flex-wrap gap-1.5 p-1.5 bg-[#0f131c] rounded border border-[#202738]">
                 {attachments.map((att, index) => (
                   <div
                     key={index}
-                    className="flex items-center gap-1.5 bg-background border border-purple-800/40 px-2.5 py-1 rounded-lg text-xs text-purple-200 shadow-sm"
+                    className="flex items-center gap-1.5 bg-[#07090e] border border-[#212839] px-2 py-0.5 rounded text-xs text-zinc-300 font-mono"
                   >
                     {att.mimeType.startsWith('image/') ? (
-                      <ImageIcon size={13} className="text-purple-400" />
+                      <ImageIcon size={11} className="text-zinc-400" />
                     ) : (
-                      <FileText size={13} className="text-purple-400" />
+                      <FileText size={11} className="text-zinc-400" />
                     )}
-                    <span className="truncate max-w-37.5 font-mono text-[11px]">{att.name}</span>
+                    <span className="truncate max-w-36 text-[11px]">{att.name}</span>
                     <button
                       type="button"
                       onClick={() => removeAttachment(index)}
-                      className="hover:text-red-400 transition p-0.5 cursor-pointer ml-1"
+                      className="hover:text-rose-400 transition ml-0.5"
                     >
-                      <X size={12} />
+                      <X size={11} />
                     </button>
                   </div>
                 ))}
               </div>
             )}
 
-            <div className="bg-surface border border-purple-900/40 focus-within:border-purple-500 rounded-2xl p-3 transition shadow-inner flex flex-col gap-2">
+            <div className="bg-[#0e121a] border border-[#202738] focus-within:border-indigo-500/50 rounded-lg p-2.5 transition shadow-xs flex flex-col gap-1.5">
               <input type="file" ref={fileInputRef} onChange={handleFileInput} multiple className="hidden" />
 
               <textarea
@@ -1213,20 +1030,22 @@ export default function App() {
                 onChange={(e) => setInputMessage(e.target.value)}
                 onKeyDown={handleKeyDown}
                 onPaste={handlePaste}
-                placeholder="Solicite alterações ou comandos de código... (Enter para enviar)"
-                className="w-full bg-transparent px-1 pt-1 text-sm text-white placeholder-gray-500 focus:outline-none resize-y min-h-17.5 max-h-96 leading-relaxed font-sans"
+                placeholder="Instrua o agente ou cole código... (Enter para enviar, Shift+Enter para pular linha)"
+                className="w-full bg-transparent px-1 pt-0.5 text-xs text-zinc-100 placeholder-zinc-600 focus:outline-none resize-y min-h-14 max-h-72 leading-relaxed font-mono"
               />
 
-              <div className="flex items-center justify-between pt-1 border-t border-purple-950/20 select-none">
-                <div className="flex items-center gap-1.5">
+              <div className="flex items-center justify-between pt-1 border-t border-[#191f2c] select-none text-zinc-500 text-[11px] font-mono">
+                <div className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    title="Anexar imagens ou documentos"
-                    className="p-1.5 hover:bg-surfaceHover text-purple-400 hover:text-purple-300 rounded-lg transition flex items-center justify-center cursor-pointer"
+                    title="Anexar arquivo"
+                    className="p-1 hover:bg-[#181d2a] text-zinc-400 hover:text-zinc-200 rounded transition"
                   >
-                    <Paperclip size={18} />
+                    <Paperclip size={14} />
                   </button>
+                  <span>↵ enviar</span>
+                  <span>⇧↵ nova linha</span>
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -1234,20 +1053,20 @@ export default function App() {
                     <button
                       type="button"
                       onClick={handleStopGeneration}
-                      className="bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/40 px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer text-xs font-semibold"
-                      title="Interromper geração"
+                      className="bg-rose-950/60 hover:bg-rose-900/60 text-rose-300 border border-rose-900/40 px-2.5 py-1 rounded transition flex items-center gap-1 cursor-pointer text-xs font-mono font-medium"
                     >
-                      <Square size={13} fill="currentColor" />
-                      <span>Parar</span>
+                      <Square size={10} fill="currentColor" />
+                      <span>parar</span>
                     </button>
                   ) : (
                     <button
                       type="submit"
                       disabled={!inputMessage.trim() && attachments.length === 0}
-                      className="bg-linear-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white p-2 rounded-xl transition flex items-center justify-center shadow-md shadow-purple-950/50 cursor-pointer disabled:opacity-40"
-                      title="Enviar mensagem (Enter)"
+                      className="bg-zinc-200 hover:bg-white text-zinc-900 font-semibold px-3 py-1 rounded transition flex items-center justify-center cursor-pointer disabled:opacity-30 disabled:hover:bg-zinc-200 text-xs font-mono"
+                      title="Enviar (Enter)"
                     >
-                      <Send size={15} />
+                      <span>enviar</span>
+                      <Send size={11} className="ml-1" />
                     </button>
                   )}
                 </div>
