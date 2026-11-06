@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, AlertOctagon, Copy, Check, Terminal } from 'lucide-react';
+import { X, AlertTriangle, Copy, Check, Terminal } from 'lucide-react';
 import { CURRENT_VERSION } from '../services/updater';
 
 export interface AppErrorInfo {
@@ -42,61 +42,75 @@ ${errorInfo.technicalDetails || 'Nenhum stack trace adicional disponível.'}
   };
 
   return (
-    <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-      <div className="bg-[#140b0f] border border-red-900/50 rounded-3xl w-full max-w-xl p-6 relative shadow-2xl shadow-red-950/60 flex flex-col">
+    <div className="fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+      {/* Container principal com restrição máxima de altura e largura */}
+      <div className="bg-[#0c0f16] border border-[#21293a] rounded-xl w-full max-w-2xl p-5 relative shadow-2xl flex flex-col font-sans max-h-[90vh]">
         <button
           onClick={onClose}
-          className="absolute top-5 right-5 text-gray-400 hover:text-white p-1 rounded-lg hover:bg-surfaceHover transition cursor-pointer"
+          className="absolute top-4 right-4 text-zinc-500 hover:text-white p-1 rounded hover:bg-[#181d2a] transition cursor-pointer"
         >
-          <X size={20} />
+          <X size={18} />
         </button>
 
-        <div className="flex items-center gap-3 mb-4 pb-3 border-b border-red-950/40">
-          <div className="p-2.5 rounded-xl bg-red-950/80 text-red-400 border border-red-800/50 shadow-inner">
-            <AlertOctagon size={22} />
+        <div className="flex items-center gap-3 mb-4 pb-3 border-b border-[#1c2232]">
+          <div className="p-2 rounded-lg bg-rose-950/40 text-rose-400 border border-rose-900/50">
+            <AlertTriangle size={18} />
           </div>
-          <div>
-            <h2 className="text-base font-bold text-white tracking-wide">{errorInfo.title}</h2>
-            <span className="text-[11px] text-red-400/80 font-mono">Contexto: {errorInfo.context}</span>
+          <div className="overflow-hidden pr-6">
+            <h2 className="text-sm font-bold text-zinc-100 tracking-wide font-mono uppercase truncate">
+              {errorInfo.title}
+            </h2>
+            <span className="text-[11px] text-rose-400/80 font-mono truncate block">
+              Contexto: {errorInfo.context}
+            </span>
           </div>
         </div>
 
-        <div className="space-y-3.5 my-2">
-          <p className="text-xs text-gray-200 leading-relaxed font-sans bg-red-950/20 p-3 rounded-xl border border-red-900/30">
-            {errorInfo.message}
-          </p>
+        {/* Área de rolagem para erros imensos */}
+        <div className="space-y-3 overflow-y-auto pr-1">
+          {/* Quebra forçada de texto (break-all) para JSONs contínuos da API */}
+          <div className="bg-[#0f121a] p-3 rounded-lg border border-[#1e2535] max-h-48 overflow-y-auto">
+            <p className="text-xs text-zinc-300 leading-relaxed font-mono break-all whitespace-pre-wrap">
+              {errorInfo.message}
+            </p>
+          </div>
 
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-[11px] font-bold text-gray-400 flex items-center gap-1.5 font-mono">
-                <Terminal size={12} className="text-red-400" />
-                <span>Log de Diagnóstico Técnico:</span>
-              </span>
+          {errorInfo.technicalDetails && (
+            <div>
+              <div className="flex items-center justify-between mb-1.5 mt-2">
+                <span className="text-[11px] font-bold text-zinc-500 flex items-center gap-1.5 font-mono uppercase tracking-wider">
+                  <Terminal size={12} className="text-rose-400" />
+                  <span>Log de Diagnóstico Técnico</span>
+                </span>
+              </div>
+
+              {/* Log técnico isolado com limite de altura */}
+              <pre className="p-3 bg-[#06080b] text-rose-300/80 text-[10px] font-mono rounded-lg border border-[#1a202c] max-h-48 overflow-y-auto whitespace-pre-wrap break-all select-text leading-relaxed">
+                {errorInfo.technicalDetails}
+              </pre>
             </div>
-
-            <pre className="p-3 bg-black/80 text-red-300/90 text-[11px] font-mono rounded-xl border border-red-950/60 max-h-48 overflow-y-auto whitespace-pre-wrap select-text leading-relaxed">
-              {errorInfo.technicalDetails || 'Sem detalhes adicionais.'}
-            </pre>
-          </div>
+          )}
         </div>
 
-        <div className="pt-4 mt-3 border-t border-red-950/40 flex items-center justify-between">
+        <div className="pt-4 mt-4 border-t border-[#1c2232] flex items-center justify-between">
           <button
             onClick={onClose}
-            className="text-xs text-gray-400 hover:text-white px-4 py-2 rounded-xl transition cursor-pointer"
+            className="text-xs font-medium text-zinc-400 hover:text-white px-3 py-1.5 rounded transition hover:bg-[#181d2a] cursor-pointer"
           >
             Fechar
           </button>
 
           <button
             onClick={handleCopy}
-            className="bg-linear-to-r from-red-700 to-rose-700 hover:from-red-600 hover:to-rose-600 text-white font-semibold px-4 py-2 rounded-xl transition text-xs shadow-lg shadow-red-950/50 flex items-center gap-1.5 cursor-pointer"
+            className="bg-[#181d2a] hover:bg-[#202738] border border-[#2b354c] text-zinc-200 font-medium px-4 py-1.5 rounded-lg transition text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
           >
-            {copied ? <Check size={14} className="text-emerald-300" /> : <Copy size={14} />}
-            <span>{copied ? 'Log Copiado para o Ctrl+V!' : 'Copiar Log Completo'}</span>
+            {copied ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
+            <span>{copied ? 'Copiado para o Ctrl+V!' : 'Copiar Log Completo'}</span>
           </button>
         </div>
       </div>
     </div>
   );
 };
+
+export default ErrorModal;

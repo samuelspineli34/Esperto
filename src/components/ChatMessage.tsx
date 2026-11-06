@@ -254,8 +254,8 @@ export const AgentFileActionCard: React.FC<{
       )}
 
       {status === 'error' && (
-        <div className="p-2.5 bg-rose-950/40 text-rose-300 text-xs font-mono border-b border-rose-900/30 flex items-center gap-2">
-          <AlertTriangle size={13} className="text-rose-400 shrink-0" />
+        <div className="p-2.5 bg-rose-950/40 text-rose-300 text-xs font-mono border-b border-rose-900/30 flex items-start gap-2 max-h-32 overflow-y-auto break-all whitespace-pre-wrap">
+          <AlertTriangle size={13} className="text-rose-400 shrink-0 mt-0.5" />
           <span>{errorMsg}</span>
         </div>
       )}
@@ -635,7 +635,9 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
               </div>
             </div>
           ) : (
-            <div className={isError ? 'text-rose-300 font-medium' : ''}>{parseAgentActions(content)}</div>
+            <div className={isError ? 'text-rose-300 font-medium break-all whitespace-pre-wrap' : ''}>
+              {parseAgentActions(content)}
+            </div>
           )}
 
           {!isEditing && (
