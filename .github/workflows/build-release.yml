@@ -250,7 +250,7 @@ jobs:
             src-tauri/target/release/bundle/macos/*.sig
           if-no-files-found: ignore
 
-  # 3. Publica todos os arquivos na Release de forma limpa, segura e sem concorrência
+  # 3. Publica todos os arquivos na Release de forma limpa, segura e sem pastas
   publish-release:
     needs: [create-release, build-binaries]
     runs-on: ubuntu-latest
@@ -264,16 +264,18 @@ jobs:
           path: release-assets
           merge-multiple: true
 
-      - name: Inspecionar arquivos prontos para publicação
+      - name: Aplanar e Inspecionar arquivos para publicação
         run: |
+          mkdir -p dist-files
+          # Encontra apenas arquivos reais recursivamente e copia para dist-files sem subpastas
+          find release-assets -type f -exec cp {} dist-files/ \;
           echo "=== Arquivos encontrados para envio à Release ==="
-          ls -lh release-assets
+          ls -lh dist-files
 
       - name: Enviar Arquivos para a Release no GitHub
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.create-release.outputs.new_version }}
         run: |
-          gh release upload "$TAG" release-assets/* --clobber --repo "${{ github.repository }}"
+          gh release upload "$TAG" dist-files/* --clobber --repo "${{ github.repository }}"
