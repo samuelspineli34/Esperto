@@ -658,7 +658,7 @@ export const SettingsModal: React.FC<Props> = ({
 
               {/* CAMPO DE HUGGING FACE TOKEN ADICIONADO */}
               <div className="p-3 bg-[#0a0d14] border border-amber-950/40 rounded-xl">
-                <label className="block text-xs font-semibold text-amber-300 mb-1">Hugging Face Token (Para Imagens e Vídeos HF)</label>
+                <label className="block text-xs font-semibold text-zinc-300 mb-1">Hugging Face Token</label>
                 <input
                   type="password"
                   value={form.huggingfaceApiKey || ''}
