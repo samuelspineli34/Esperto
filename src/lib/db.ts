@@ -22,7 +22,7 @@ export interface ChatRunSettings {
   thinkingLevel?: 'off' | 'low' | 'medium' | 'high';
   googleSearch?: boolean;
   contextLength?: number;
-  mediaResolution?: 'default' | 'low' | 'medium' | 'high'; // Corrigido: adicionado 'medium'
+  mediaResolution?: 'default' | 'low' | 'medium' | 'high';
   stopSequences?: string[];
 }
 
@@ -65,6 +65,7 @@ export interface Settings {
   anthropicApiKey?: string;
   deepseekApiKey?: string;
   openrouterApiKey?: string;
+  huggingfaceApiKey?: string; // Chave do Hugging Face adicionada
   customProviders?: CustomProviderConfig[];
 
   // Ollama & GPU

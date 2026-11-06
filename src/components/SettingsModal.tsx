@@ -464,7 +464,6 @@ export const SettingsModal: React.FC<Props> = ({
 
           {activeTab === 'ollama' && (
             <div className="space-y-4">
-              {/* JANELA DE CONTEXTO DO OLLAMA (RESOLVE DEFINITIVAMENTE O ERRO 400) */}
               <div className="p-3.5 bg-[#0a0f16] border border-[#1b2f26] rounded-xl space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -474,21 +473,21 @@ export const SettingsModal: React.FC<Props> = ({
                     </span>
                   </div>
                   <span className="text-xs font-mono text-emerald-300 font-bold">
-                    {form.ollamaContextLength || 32768} tokens
+                    {form.ollamaContextLength || 8192} tokens
                   </span>
                 </div>
                 <p className="text-[11px] text-zinc-400">
-                  Controla quantos tokens o Ollama pode processar. Seus arquivos somam mais de 10.000 tokens — mantendo em 32k ou 64k, o modelo lerá o projeto inteiro sem estourar a memória.
+                  Controla quantos tokens o Ollama processa. Para sua RTX de 12GB com modelos 14B, 8k é o ideal para manter a alta velocidade na GPU.
                 </p>
 
                 <div className="flex gap-2 pt-1 font-mono text-xs">
-                  {[16384, 32768, 65536, 131072].map((tokens) => (
+                  {[4096, 8192, 16384, 32768].map((tokens) => (
                     <button
                       key={tokens}
                       type="button"
                       onClick={() => setForm((prev) => ({ ...prev, ollamaContextLength: tokens }))}
-                      className={`flex-1 py-1 rounded transition border cursor-pointer ${
-                        (form.ollamaContextLength || 32768) === tokens
+                      className={`flex-1 py-1 rounded transition border cursor-pointer text-center ${
+                        (form.ollamaContextLength || 8192) === tokens
                           ? 'bg-emerald-900/60 text-emerald-200 border-emerald-500/60 font-bold'
                           : 'bg-[#10161f] text-zinc-400 border-[#1f2838] hover:text-white'
                       }`}
@@ -499,7 +498,6 @@ export const SettingsModal: React.FC<Props> = ({
                 </div>
               </div>
 
-              {/* Status do Motor */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div className="p-3 bg-[#0a0d13] border border-[#1c2232] rounded-xl flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -546,7 +544,6 @@ export const SettingsModal: React.FC<Props> = ({
                 </div>
               </div>
 
-              {/* Baixar Modelo Direto */}
               <div className="p-3.5 bg-[#0a0d13] border border-[#1c2232] rounded-xl space-y-2.5">
                 <span className="text-xs font-bold text-zinc-200 flex items-center gap-1.5 font-mono">
                   <Download size={13} className="text-indigo-400" />
@@ -587,7 +584,6 @@ export const SettingsModal: React.FC<Props> = ({
                 )}
               </div>
 
-              {/* Lista e Exclusão de Modelos */}
               <div className="p-3.5 bg-[#0a0d13] border border-[#1c2232] rounded-xl space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-zinc-200 font-mono">Modelos Instalados</span>
@@ -657,6 +653,18 @@ export const SettingsModal: React.FC<Props> = ({
                   onChange={(e) => setForm((prev) => ({ ...prev, openrouterApiKey: e.target.value }))}
                   placeholder="sk-or-v1-..."
                   className="w-full bg-[#121622] border border-[#21293a] rounded px-2.5 py-1 text-xs text-white focus:outline-none"
+                />
+              </div>
+
+              {/* CAMPO DE HUGGING FACE TOKEN ADICIONADO */}
+              <div className="p-3 bg-[#0a0d14] border border-amber-950/40 rounded-xl">
+                <label className="block text-xs font-semibold text-amber-300 mb-1">Hugging Face Token (Para Imagens e Vídeos HF)</label>
+                <input
+                  type="password"
+                  value={form.huggingfaceApiKey || ''}
+                  onChange={(e) => setForm((prev) => ({ ...prev, huggingfaceApiKey: e.target.value }))}
+                  placeholder="hf_..."
+                  className="w-full bg-[#121622] border border-amber-900/40 rounded px-2.5 py-1 text-xs text-white focus:outline-none"
                 />
               </div>
 
