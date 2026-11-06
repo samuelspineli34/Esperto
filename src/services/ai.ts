@@ -47,7 +47,6 @@ export async function* streamAIResponse({
     finalSystemInstruction += `\n\n[ESTRUTURA E CÓDIGO DO PROJETO LOCAL]:\n${directoryContext.trim()}`;
   }
 
-  // 1. SERVIDOR PERSONALIZADO (OpenAI Compatible)
   if (provider === 'custom') {
     const [, providerId, ...modelParts] = model.split(':');
     const customProvider = settings.customProviders?.find((item) => item.id === providerId);
@@ -70,7 +69,6 @@ export async function* streamAIResponse({
     return;
   }
 
-  // 2. OLLAMA LOCAL (Com auto-escalonamento de tokens para não estourar)
   if (provider === 'ollama') {
     yield* streamOllama({
       model,
@@ -80,7 +78,7 @@ export async function* streamAIResponse({
       attachments,
       temperature: settings.temperature,
       topP: settings.topP,
-      contextLength: settings.ollamaContextLength || 32768,
+      contextLength: settings.ollamaContextLength || 8192,
       customHost: settings.ollamaHost,
       customPath: settings.ollamaCustomPath,
       signal,
@@ -88,7 +86,6 @@ export async function* streamAIResponse({
     return;
   }
 
-  // 3. OPENROUTER
   if (provider === 'openrouter') {
     if (!settings.openrouterApiKey) {
       throw new Error('Chave de API do OpenRouter não configurada. Abra as Configurações.');
@@ -108,7 +105,6 @@ export async function* streamAIResponse({
     return;
   }
 
-  // 4. GOOGLE GEMINI
   if (provider === 'gemini') {
     const key = settings.geminiApiKey;
     if (!key) throw new Error('Chave de API do Gemini não configurada. Abra as Configurações.');
@@ -131,7 +127,6 @@ export async function* streamAIResponse({
     return;
   }
 
-  // 5. ANTHROPIC CLAUDE
   if (provider === 'anthropic') {
     if (!settings.anthropicApiKey) throw new Error('Chave de API do Claude não configurada.');
     yield* streamClaude({
@@ -151,7 +146,6 @@ export async function* streamAIResponse({
     return;
   }
 
-  // 6. OPENAI
   if (provider === 'openai') {
     if (!settings.openaiApiKey) throw new Error('Chave de API da OpenAI não configurada.');
     yield* streamOpenAI({
@@ -170,7 +164,6 @@ export async function* streamAIResponse({
     return;
   }
 
-  // 7. DEEPSEEK
   if (provider === 'deepseek') {
     if (!settings.deepseekApiKey) throw new Error('Chave de API da DeepSeek não configurada.');
     yield* streamDeepSeek({

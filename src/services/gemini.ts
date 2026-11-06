@@ -18,7 +18,6 @@ interface StreamOptions {
   signal?: AbortSignal;
 }
 
-// Função auxiliar para aguardar milissegundos
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export async function* streamGemini({
@@ -44,7 +43,49 @@ export async function* streamGemini({
   const selectedModel = model.trim() || 'gemini-3.7-flash';
   const ai = new GoogleGenAI({ apiKey: apiKey.trim() });
 
-  // Janela deslizante: limita o histórico enviado a no máximo as últimas 10 mensagens para economizar cota TPM
+  // DETECÇÃO AUTOMÁTICA DE PEDIDO DE IMAGEM:
+  // Se o usuário pedir para gerar uma imagem, aciona o modelo de imagem do Gemini de graça
+  const isImageRequest = 
+    newMessage.toLowerCase().startsWith('gere uma imagem') ||
+    newMessage.toLowerCase().startsWith('crie uma imagem') ||
+    newMessage.toLowerCase().startsWith('generate an image') ||
+    newMessage.toLowerCase().startsWith('desenhe ');
+
+  if (isImageRequest) {
+    yield `Gerando imagem solicitada...\n\n`;
+    try {
+      // Usa a API de Interações/Geração de Imagem do SDK @google/genai
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-pro-image-preview',
+        contents: [newMessage],
+        config: {
+          responseModalities: ['IMAGE', 'TEXT'],
+        },
+      });
+
+      let imageFound = false;
+      if (response.candidates?.[0]?.content?.parts) {
+        for (const part of response.candidates[0].content.parts) {
+          if (part.inlineData && part.inlineData.data) {
+            const mime = part.inlineData.mimeType || 'image/png';
+            const b64 = part.inlineData.data;
+            yield `\n\n![Imagem Gerada](data:${mime};base64,${b64})\n\n`;
+            imageFound = true;
+          }
+        }
+      }
+
+      if (!imageFound && response.text) {
+        yield response.text;
+      } else if (!imageFound) {
+        yield 'A IA processou o pedido, mas o provedor não retornou os dados binários da imagem. Tente refinar o prompt.';
+      }
+      return;
+    } catch (imgErr: any) {
+      yield `\n\n*(Aviso: Falha ao gerar imagem nativa: ${imgErr?.message || 'Erro desconhecido'}. Tentando processar como chat normal...)*\n\n`;
+    }
+  }
+
   const boundedHistory = history.slice(-10);
 
   const contents = boundedHistory.map((msg) => {
@@ -97,7 +138,6 @@ export async function* streamGemini({
     config.mediaResolution = `MEDIA_RESOLUTION_${mediaResolution.toUpperCase()}`;
   }
 
-  // AUTO-RETRY: Tenta até 3 vezes caso o Google dê erro 429 ou 503 temporário
   let attempts = 0;
   const maxAttempts = 3;
 
@@ -115,15 +155,13 @@ export async function* streamGemini({
           yield chunk.text;
         }
       }
-      return; // Sucesso, encerra o gerador
+      return;
     } catch (err: any) {
       if (signal?.aborted) return;
       attempts++;
       const errMessage = err?.message || JSON.stringify(err);
 
-      // Se for erro de cota por minuto (429) ou sobrecarga (503), aguarda e tenta novamente
       if ((errMessage.includes('429') || errMessage.includes('503') || errMessage.includes('RESOURCE_EXHAUSTED')) && attempts < maxAttempts) {
-        // Aguarda 4 segundos antes de retentar
         yield `\n\n*(Aguardando cota da API gratuita liberar em instantes...)*\n\n`;
         await sleep(4500);
         continue;
