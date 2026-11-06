@@ -117,10 +117,15 @@ export const SettingsModal: React.FC<Props> = ({
     setPullStatus('Iniciando conexão com o Ollama...');
 
     try {
-      await pullOllamaModel(targetTag, form.ollamaHost, (percent, status) => {
-        setPullProgress(percent);
-        setPullStatus(status);
-      });
+      await pullOllamaModel(
+        targetTag,
+        form.ollamaHost,
+        form.ollamaCustomPath,
+        (percent, status) => {
+          setPullProgress(percent);
+          setPullStatus(status);
+        }
+      );
       setPullStatus('Modelo pronto no PC!');
       setPullModelTag('');
       await checkOllamaStatusQuick();
@@ -415,7 +420,6 @@ export const SettingsModal: React.FC<Props> = ({
 
           {activeTab === 'ollama' && (
             <div className="space-y-4">
-              {/* Status do Servidor */}
               <div className="p-4 bg-emerald-950/20 border border-emerald-900/40 rounded-2xl space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -500,7 +504,6 @@ export const SettingsModal: React.FC<Props> = ({
                   </button>
                 </div>
 
-                {/* Modelos Sem Censura Recomendados com 1 Clique */}
                 <div className="pt-2">
                   <span className="text-[10px] text-gray-400 font-bold block mb-1.5 uppercase tracking-wider">
                     Instalar Modelos Sem Censura / Livres com 1 Clique:

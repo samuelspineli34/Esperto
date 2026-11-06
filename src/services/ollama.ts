@@ -23,6 +23,7 @@ interface StreamOptions {
   topP?: number;
   contextLength?: number;
   customHost?: string;
+  customPath?: string;
   signal?: AbortSignal;
 }
 
@@ -51,23 +52,43 @@ export async function startOllama(customPath?: string, customHost?: string): Pro
   return await invoke<string>('start_ollama_service', { customPath, customHost });
 }
 
+/**
+ * Garante que o Ollama está online em segundo plano.
+ * Se estiver fechado, inicia o processo de forma invisível.
+ */
+export async function ensureOllamaRunning(customHost?: string, customPath?: string): Promise<boolean> {
+  const isOnline = await checkOllamaRunning(customHost);
+  if (isOnline) return true;
+
+  try {
+    await startOllama(customPath, customHost);
+    return await checkOllamaRunning(customHost);
+  } catch (e) {
+    console.warn('Tentativa de auto-start do Ollama:', e);
+    return false;
+  }
+}
+
 export async function selectGgufFile(): Promise<string | null> {
   return await invoke<string | null>('select_gguf_file');
 }
 
 export async function importGgufToOllama(modelName: string, ggufPath: string): Promise<string> {
+  await ensureOllamaRunning();
   return await invoke<string>('import_gguf_to_ollama', { modelName, ggufPath });
 }
 
 export async function pullOllamaModel(
   modelName: string,
   customHost?: string,
+  customPath?: string,
   onProgress?: (percent: number, status: string) => void
 ): Promise<void> {
+  await ensureOllamaRunning(customHost, customPath);
+
   const host = (customHost || DEFAULT_OLLAMA_HOST).replace(/\/+$/, '');
   let cleanName = modelName.trim();
 
-  // Converte URLs do Hugging Face coladas direto pelo usuário
   if (cleanName.includes('huggingface.co/')) {
     cleanName = cleanName.replace(/https?:\/\/huggingface\.co\//, 'hf.co/');
   }
@@ -122,33 +143,35 @@ export async function getInstalledOllamaModels(
     const data = JSON.parse(rawJson);
     return { models: (data.models as OllamaModelTag[]) || [] };
   } catch {
-    try {
-      await startOllama(customPath, customHost);
-      const retryJson = await invoke<string>('fetch_ollama_tags', { customHost });
-      const data = JSON.parse(retryJson);
-      return { models: (data.models as OllamaModelTag[]) || [] };
-    } catch (rustErr: any) {
-      const host = customHost || DEFAULT_OLLAMA_HOST;
+    const started = await ensureOllamaRunning(customHost, customPath);
+    if (started) {
       try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 3500);
-        const res = await fetch(`${host.replace(/\/+$/, '')}/api/tags`, {
-          headers: { Accept: 'application/json' },
-          signal: controller.signal,
-        });
-        clearTimeout(timeout);
+        const retryJson = await invoke<string>('fetch_ollama_tags', { customHost });
+        const data = JSON.parse(retryJson);
+        return { models: (data.models as OllamaModelTag[]) || [] };
+      } catch (_) {}
+    }
 
-        if (res.ok) {
-          const data = await res.json();
-          return { models: (data.models as OllamaModelTag[]) || [] };
-        }
-        return { models: [], error: `HTTP ${res.status}: ${await res.text()}` };
-      } catch (fetchErr: any) {
-        return {
-          models: [],
-          error: `Ollama offline em ${host}. Inicie com 'ollama serve' ou revise as configurações.`,
-        };
+    const host = customHost || DEFAULT_OLLAMA_HOST;
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3500);
+      const res = await fetch(`${host.replace(/\/+$/, '')}/api/tags`, {
+        headers: { Accept: 'application/json' },
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      if (res.ok) {
+        const data = await res.json();
+        return { models: (data.models as OllamaModelTag[]) || [] };
       }
+      return { models: [], error: `HTTP ${res.status}: ${await res.text()}` };
+    } catch {
+      return {
+        models: [],
+        error: `Ollama offline em ${host}. O Esperto tentará iniciá-lo automaticamente ao receber uma mensagem.`,
+      };
     }
   }
 }
@@ -163,8 +186,12 @@ export async function* streamOllama({
   topP = 0.9,
   contextLength,
   customHost,
+  customPath,
   signal,
 }: StreamOptions) {
+  // Garante que o Ollama subiu antes de disparar o prompt
+  await ensureOllamaRunning(customHost, customPath);
+
   const host = (customHost || DEFAULT_OLLAMA_HOST).replace(/\/+$/, '');
   const cleanModelName = model.startsWith('ollama:') ? model.replace('ollama:', '') : model;
 
@@ -177,7 +204,7 @@ export async function* streamOllama({
 
   if (images.length > 0 && !isVisionModel(cleanModelName)) {
     throw new Error(
-      `O modelo local '${cleanModelName}' não possui visão multimodal. Remova a imagem ou use um modelo com visão.`
+      `O modelo local '${cleanModelName}' não possui visão multimodal. Remova a imagem da mensagem ou utilize um modelo com visão.`
     );
   }
 
@@ -222,7 +249,7 @@ export async function* streamOllama({
       signal,
     });
   } catch (err: any) {
-    throw new Error(`Não foi possível conectar ao Ollama em ${host}. Verifique se o servidor está ativo.`);
+    throw new Error(`Não foi possível conectar ao Ollama em ${host}. O serviço foi reiniciado, tente enviar novamente.`);
   }
 
   if (!res.ok) {

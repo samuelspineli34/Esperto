@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { db, Chat, Message, Settings, Attachment, WorkspacePreset } from './lib/db';
 import { streamAIResponse } from './services/ai';
 import { getModelInfo, registerLocalOllamaModels, registerCustomProviderModels } from './lib/models';
-import { getInstalledOllamaModels } from './services/ollama';
+import { getInstalledOllamaModels, ensureOllamaRunning } from './services/ollama';
 import { Sidebar } from './components/Sidebar';
 import { ChatMessage } from './components/ChatMessage';
 import { SettingsModal } from './components/SettingsModal';
@@ -178,8 +178,11 @@ export default function App() {
     return (inputTokens / 1000000) * inPrice + (outputTokens / 1000000) * outPrice;
   }, [messages, inputMessage, systemInstruction, settings.globalMemory, modelInfo]);
 
+  // Inicialização Automática e Silenciosa do Ollama ao Abrir o Esperto
   useEffect(() => {
     const initLocalModels = async () => {
+      // Sobe o serviço se estiver desligado
+      await ensureOllamaRunning(settings.ollamaHost, settings.ollamaCustomPath);
       const res = await getInstalledOllamaModels(settings.ollamaHost, settings.ollamaCustomPath);
       if (res.models && res.models.length > 0) {
         registerLocalOllamaModels(res.models);
