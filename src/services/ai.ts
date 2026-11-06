@@ -28,76 +28,30 @@ async function* streamHuggingFaceMedia(
   hfToken?: string
 ): AsyncGenerator<string> {
   if (!hfToken || !hfToken.trim()) {
-    yield `⚠️ Para utilizar a geração de mídias do Hugging Face, insira sua Hugging Face Token nas Configurações (aba Chaves de Nuvem).`;
+    yield `⚠️ Configure sua Hugging Face Token nas Configurações.`;
     return;
   }
 
-  const hasImageAttachment = attachments.some((att) => att.mimeType.startsWith('image/'));
-  const isVideoRequest = prompt.toLowerCase().includes('vídeo') || prompt.toLowerCase().includes('video') || hasImageAttachment;
-
-  if (isVideoRequest && hasImageAttachment) {
-    yield `Processando animação (Image-to-Video) no Hugging Face... Isso pode levar alguns segundos.\n\n`;
-  } else if (isVideoRequest) {
-    yield `Processando geração de vídeo por texto no Hugging Face...\n\n`;
-  } else {
-    yield `Processando geração de imagem no Hugging Face (FLUX.1-schnell)...\n\n`;
-  }
+  yield `Consultando motor de mídia...`;
 
   try {
-    let endpoint = 'https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell';
-    let payload: any = { inputs: prompt };
-
-    // Se o usuário anexou uma imagem e pediu vídeo, usa Stable Video Diffusion (Image-to-Video)
-    if (hasImageAttachment) {
-      const imgAtt = attachments.find((att) => att.mimeType.startsWith('image/'));
-      if (imgAtt) {
-        endpoint = 'https://api-inference.huggingface.co/models/stabilityai/stable-video-diffusion-img2vid-xt';
-        payload = {
-          inputs: `data:${imgAtt.mimeType};base64,${imgAtt.data}`,
-          parameters: {
-            fps: 6,
-            motion_bucket_id: 127,
-          },
-        };
-      }
-    } else if (isVideoRequest) {
-      // Text-to-Video caso não tenha imagem de entrada mas tenha pedido vídeo
-      endpoint = 'https://api-inference.huggingface.co/models/ali-vilab/text-to-video-ms-1.7b';
-      payload = { inputs: prompt };
-    }
-
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${hfToken.trim()}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
+    // Agora usamos o backend Rust para buscar a imagem, evitando erros de CORS do browser
+    const base64Data = await invoke<string>('fetch_media_from_hf', { 
+      prompt, 
+      token: hfToken,
+      isVideo: prompt.toLowerCase().includes('vídeo')
     });
 
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Hugging Face erro (${response.status}): ${errText}`);
-    }
-
-    const blob = await response.blob();
-    const reader = new FileReader();
-
-    const base64Data = await new Promise<string>((resolve, reject) => {
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-
-    if (isVideoRequest) {
-      yield `\n\n### Vídeo Gerado:\n<video controls src="${base64Data}" class="max-w-md rounded-xl shadow-lg"></video>\n\n`;
+    if (prompt.toLowerCase().includes('vídeo')) {
+      yield `\n\n### Vídeo Gerado:\n<video controls src="${base64Data}" class="max-w-md rounded-xl"></video>\n\n`;
     } else {
       yield `\n\n![Imagem Gerada](${base64Data})\n\n`;
     }
   } catch (err: any) {
-    yield `\n\n⚠️ Falha na geração multimídia via Hugging Face: ${err?.message || err}\n\n`;
+    yield `\n\n Erro na renderização: ${err?.toString()}\n\n`;
   }
 }
+
 
 export async function* streamAIResponse({
   model,
@@ -112,13 +66,12 @@ export async function* streamAIResponse({
   signal,
 }: StreamOptions) {
   const lowerMsg = newMessage.toLowerCase();
-  if (lowerMsg.startsWith('hf: ') || lowerMsg.startsWith('gerar imagem') || lowerMsg.startsWith('gerar vídeo') || lowerMsg.startsWith('gerar video')) {
-    const cleanPrompt = newMessage
-      .replace(/^(hf:\s*|gerar imagem\s*(de)?\s*|gerar vídeo\s*(de)?\s*|gerar video\s*(de)?\s*)/i, '')
-      .trim();
-    yield* streamHuggingFaceMedia(cleanPrompt || 'Cena gerada por IA', attachments, settings.huggingfaceApiKey);
-    return;
+  if (lowerMsg.includes('crie uma imagem') || lowerMsg.includes('gerar imagem')) {
+      const cleanPrompt = newMessage.replace(/.*?(crie uma imagem|gerar imagem)\s*(de|do|da)?\s*/i, '').trim();
+      yield* streamHuggingFaceMedia(cleanPrompt, attachments, settings.huggingfaceApiKey);
+      return;
   }
+  
 
   const provider = getProviderByModel(model);
   const relevantHistory = useMemory ? history : [];

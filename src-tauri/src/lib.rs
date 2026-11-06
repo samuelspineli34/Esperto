@@ -114,6 +114,33 @@ fn check_ollama_status(custom_host: Option<String>) -> Result<bool, String> {
 }
 
 #[tauri::command]
+async fn fetch_media_from_hf(prompt: String, token: String, is_video: bool) -> Result<String, String> {
+    let client = reqwest::Client::new();
+    let endpoint = if is_video {
+        "https://api-inference.huggingface.co/models/stabilityai/stable-video-diffusion-img2vid-xt"
+    } else {
+        "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell"
+    };
+
+    let response = client.post(endpoint)
+        .header("Authorization", format!("Bearer {}", token.trim()))
+        .json(&serde_json::json!({ "inputs": prompt }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !response.status().is_success() {
+        return Err(format!("Hugging Face status: {}", response.status()));
+    }
+
+    let bytes = response.bytes().await.map_err(|e| e.to_string())?;
+    let base64 = base64::encode(bytes);
+    
+    let mime = if is_video { "video/mp4" } else { "image/png" };
+    Ok(format!("data:{};base64,{}", mime, base64))
+}
+
+#[tauri::command]
 fn start_ollama_service(custom_path: Option<String>, custom_host: Option<String>) -> Result<String, String> {
     let (host, port) = parse_host_port(custom_host);
     let socket_str = format!("{}:{}", host, port);
