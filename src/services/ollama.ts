@@ -202,7 +202,7 @@ export async function getInstalledOllamaModels(
     } catch {
       return {
         models: [],
-        error: `Ollama offline em ${host}. O Esperto iniciará o motor automaticamente ao enviar uma mensagem.`,
+        error: `Ollama offline em ${host}. O Esperto tentará iniciá-lo automaticamente ao receber uma mensagem.`,
       };
     }
   }
@@ -239,7 +239,8 @@ export async function* streamOllama({
     );
   }
 
-  const boundedHistory = history.slice(-25);
+  // Janela deslizante enxuta para não saturar a memória da GPU
+  const boundedHistory = history.slice(-15);
 
   const messagesPayload: any[] = [
     {
@@ -258,18 +259,23 @@ export async function* streamOllama({
   if (images.length > 0) currentUserMsg.images = images;
   messagesPayload.push(currentUserMsg);
 
-  // CÁLCULO DINÂMICO DE CONTEXTO: Garante que o Ollama NUNCA estoure com erro 400
+  // ALOCAÇÃO DE CONTEXTO JUST-IN-TIME (JIT):
+  // Calcula exatamente quanto o prompt gasta e aloca com folga justa de 2.048 tokens.
+  // Evita pré-alocar 32k/64k na VRAM desnecessariamente, impedindo que o modelo seja jogado para a CPU!
   let promptTotalChars = 0;
   messagesPayload.forEach((m) => {
     promptTotalChars += (m.content || '').length;
   });
 
-  const estimatedTokens = Math.ceil(promptTotalChars / 3.2);
-  const baseContext = contextLength || 32768; // Piso de 32k tokens (em vez de míseros 8k)
+  const estimatedPromptTokens = Math.ceil(promptTotalChars / 3.4);
+  const neededContext = estimatedPromptTokens + 2048; // Folga para resposta
 
-  // Se o projeto for grande, aloca o contexto necessário com 4.096 tokens de sobra para a resposta
-  const calculatedContext = Math.max(baseContext, estimatedTokens + 4096);
-  const targetContext = Math.min(calculatedContext, 131072); // Até 128k tokens
+  // Arredonda para blocos de 2048 para performance estável de cache
+  const roundedContext = Math.ceil(neededContext / 2048) * 2048;
+
+  // Respeita o teto configurado, mantendo o modelo sempre dentro da GPU
+  const userMaxCap = contextLength || 32768;
+  const targetContext = Math.max(4096, Math.min(roundedContext, userMaxCap));
 
   let res: Response;
   try {
@@ -283,7 +289,8 @@ export async function* streamOllama({
           temperature,
           top_p: topP,
           repeat_penalty: 1.1,
-          num_ctx: targetContext, // Alocação dinâmica que resolve o Erro 400
+          num_ctx: targetContext, // Alocação sob medida para caber na GPU
+          num_predict: 4096,      // Evita loops infinitos
         },
         keep_alive: '24h',
         stream: true,

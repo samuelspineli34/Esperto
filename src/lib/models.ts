@@ -17,11 +17,23 @@ export interface AIModel {
   supportsImages: boolean;
   supportsSearch: boolean;
   isLocal?: boolean;
-  providerId?: string; // ID do CustomProviderConfig quando for custom
+  providerId?: string;
+}
+
+export interface ModelCapabilities {
+  supportsTemperature: boolean;
+  temperatureLockReason?: string;
+  supportsThinking: boolean;
+  thinkingLockReason?: string;
+  supportsSearch: boolean;
+  searchLockReason?: string;
+  supportsContextAdjustment: boolean;
+  contextLockReason?: string;
+  supportsMediaResolution: boolean;
+  mediaLockReason?: string;
 }
 
 export const STATIC_MODELS: AIModel[] = [
-  // === OPENROUTER (ROTA GRATUITA) ===
   {
     id: 'openrouter/free',
     name: 'OpenRouter: Free Router',
@@ -35,8 +47,6 @@ export const STATIC_MODELS: AIModel[] = [
     supportsImages: true,
     supportsSearch: false,
   },
-
-  // === GOOGLE GEMINI ===
   {
     id: 'gemini-3.7-flash',
     name: 'Gemini 3.7 Flash',
@@ -64,21 +74,6 @@ export const STATIC_MODELS: AIModel[] = [
     supportsSearch: true,
   },
   {
-    id: 'gemini-3.5-flash-lite',
-    name: 'Gemini 3.5 Flash Lite',
-    provider: 'gemini',
-    description: 'Ultra veloz para grandes volumes de chamadas.',
-    contextLimit: 250000,
-    pricing: 'free_tier',
-    inputPrice: 0,
-    outputPrice: 0,
-    priceNote: 'Cota gratuita disponível',
-    supportsImages: true,
-    supportsSearch: true,
-  },
-
-  // === ANTHROPIC CLAUDE ===
-  {
     id: 'claude-3-7-sonnet-latest',
     name: 'Claude 3.7 Sonnet (Direto)',
     provider: 'anthropic',
@@ -104,8 +99,6 @@ export const STATIC_MODELS: AIModel[] = [
     supportsImages: true,
     supportsSearch: false,
   },
-
-  // === OPENAI ===
   {
     id: 'gpt-4o',
     name: 'GPT-4o (Direto)',
@@ -116,19 +109,6 @@ export const STATIC_MODELS: AIModel[] = [
     inputPrice: 2.5,
     outputPrice: 10.0,
     priceNote: '$2.50 / $10.00 por 1M',
-    supportsImages: true,
-    supportsSearch: false,
-  },
-  {
-    id: 'gpt-4o-mini',
-    name: 'GPT-4o Mini (Direto)',
-    provider: 'openai',
-    description: 'Ultra econômico com suporte a visão e bom em rotinas leves.',
-    contextLimit: 128000,
-    pricing: 'paid_only',
-    inputPrice: 0.15,
-    outputPrice: 0.6,
-    priceNote: '$0.15 / $0.60 por 1M',
     supportsImages: true,
     supportsSearch: false,
   },
@@ -145,8 +125,6 @@ export const STATIC_MODELS: AIModel[] = [
     supportsImages: false,
     supportsSearch: false,
   },
-
-  // === DEEPSEEK ===
   {
     id: 'deepseek-chat',
     name: 'DeepSeek V3 (Direto)',
@@ -286,25 +264,6 @@ export function getModelInfo(modelId: string, customProviders?: CustomProviderCo
     };
   }
 
-  if (modelId.startsWith('custom:')) {
-    const [, , ...modelParts] = modelId.split(':');
-    const realModel = modelParts.join(':');
-    return {
-      id: modelId,
-      name: realModel || modelId,
-      provider: 'custom',
-      description: 'Modelo de servidor personalizado',
-      contextLimit: 64000,
-      pricing: 'free_tier',
-      inputPrice: 0,
-      outputPrice: 0,
-      priceNote: 'Personalizado',
-      supportsImages: false,
-      supportsSearch: false,
-      isLocal: true,
-    };
-  }
-
   return {
     id: modelId,
     name: modelId,
@@ -316,5 +275,64 @@ export function getModelInfo(modelId: string, customProviders?: CustomProviderCo
     outputPrice: 8.0,
     supportsImages: true,
     supportsSearch: false,
+  };
+}
+
+/**
+ * Avalia as capacidades de um modelo para aplicar travas e cadeados dinâmicos
+ */
+export function getModelCapabilities(modelId: string): ModelCapabilities {
+  const lower = modelId.toLowerCase();
+  const provider = getProviderByModel(modelId);
+
+  // Modelos de raciocínio puro com amostragem fixa (proíbem mexer na temperatura)
+  const isReasoningModel =
+    lower.includes('deepseek-reasoner') ||
+    lower.includes('deepseek-r1') ||
+    lower.startsWith('o1') ||
+    lower.startsWith('o3');
+
+  // Suporte a Thinking configurável
+  const supportsThinking =
+    lower.includes('gemini-3') ||
+    lower.includes('claude-3-7') ||
+    lower.startsWith('o1') ||
+    lower.startsWith('o3');
+
+  // Grounding com busca no Google
+  const supportsSearch = provider === 'gemini';
+
+  // Ajuste manual de VRAM/contexto
+  const supportsContextAdjustment = provider === 'ollama' || provider === 'custom';
+
+  // Multimodal de imagens
+  const supportsMediaResolution =
+    provider === 'gemini' || lower.includes('vl') || lower.includes('vision') || lower.includes('gpt-4o');
+
+  return {
+    supportsTemperature: !isReasoningModel,
+    temperatureLockReason: isReasoningModel
+      ? 'Modelos de raciocínio usam amostragem fixa para manter a coerência da cadeia lógica.'
+      : undefined,
+
+    supportsThinking,
+    thinkingLockReason: !supportsThinking
+      ? 'Este modelo não possui camada de raciocínio adaptativo (Thinking).'
+      : undefined,
+
+    supportsSearch,
+    searchLockReason: !supportsSearch
+      ? 'A pesquisa no Google (Grounding) é um recurso exclusivo dos modelos Google Gemini.'
+      : undefined,
+
+    supportsContextAdjustment,
+    contextLockReason: !supportsContextAdjustment
+      ? 'Modelos em nuvem possuem janela de contexto pré-fixada pelo provedor.'
+      : undefined,
+
+    supportsMediaResolution,
+    mediaLockReason: !supportsMediaResolution
+      ? 'Modelo textual puro. Não processa imagens ou documentos visuais.'
+      : undefined,
   };
 }

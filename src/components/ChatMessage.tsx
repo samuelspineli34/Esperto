@@ -37,7 +37,7 @@ export interface ChatMessageProps {
 function cleanCodeForWriting(filePath: string, rawCode: string): string {
   let cleaned = rawCode.trim();
 
-  // 1. Remove cercas markdown e tags aninhadas acidentalmente
+  // Limpa tags e markdown aninhados
   cleaned = cleaned.replace(/^```[a-zA-Z0-9_-]*\r?\n/, '');
   cleaned = cleaned.replace(/\r?\n```\s*$/, '');
   cleaned = cleaned.replace(/<\/?esperto_write[^>]*>/gi, '');
@@ -70,23 +70,12 @@ function cleanCodeForWriting(filePath: string, rawCode: string): string {
   return cleaned.trim();
 }
 
-function hasOmissionEllipsis(code: string): boolean {
-  const lines = code.split(/\r?\n/);
-  return lines.some(
-    (l) =>
-      l.trim() === '...' ||
-      l.trim() === '/* ... */' ||
-      l.trim() === '// ...' ||
-      l.trim().startsWith('// resto do código') ||
-      l.trim().startsWith('// ... existing code')
-  );
-}
-
 export const AgentFileActionCard: React.FC<{
   filePath: string;
   content: string;
   baseDirectories?: string[];
   requireConfirmation?: boolean;
+  isIncomplete?: boolean;
   onFileWritten?: (savedPath: string) => void;
   onRequestSelectFolder?: () => Promise<string | null>;
 }> = ({
@@ -94,6 +83,7 @@ export const AgentFileActionCard: React.FC<{
   content,
   baseDirectories = [],
   requireConfirmation = true,
+  isIncomplete = false,
   onFileWritten,
   onRequestSelectFolder,
 }) => {
@@ -104,7 +94,6 @@ export const AgentFileActionCard: React.FC<{
   const [errorMsg, setErrorMsg] = useState('');
 
   const cleanedContent = cleanCodeForWriting(currentFilePath, content);
-  const hasEllipsis = hasOmissionEllipsis(cleanedContent);
 
   const resolveAbsolutePath = (pathInput: string): string => {
     let p = pathInput.trim().replace(/^['"]|['"]$/g, '');
@@ -230,10 +219,12 @@ export const AgentFileActionCard: React.FC<{
             <button
               type="button"
               onClick={() => (requireConfirmation ? setStatus('confirming') : executeWrite())}
-              disabled={status === 'writing'}
+              disabled={status === 'writing' || isIncomplete}
               className={`px-2.5 py-1 rounded text-xs font-medium transition flex items-center gap-1.5 cursor-pointer border ${
                 status === 'success'
                   ? 'bg-emerald-950/80 text-emerald-300 border-emerald-600/50'
+                  : isIncomplete
+                  ? 'bg-[#181d2a] opacity-40 cursor-not-allowed border-zinc-800 text-zinc-500'
                   : 'bg-[#181d2a] hover:bg-[#222838] text-zinc-200 border-[#2b354c]'
               }`}
             >
@@ -255,10 +246,10 @@ export const AgentFileActionCard: React.FC<{
         </div>
       </div>
 
-      {hasEllipsis && (
+      {isIncomplete && (
         <div className="px-3 py-1.5 bg-amber-950/30 text-amber-300 text-[11px] font-mono border-b border-amber-900/30 flex items-center gap-1.5">
           <AlertTriangle size={12} className="text-amber-400 shrink-0" />
-          <span>Atenção: O modelo incluiu trechos resumidos (...). Inspecione o código antes de gravar.</span>
+          <span>Aviso: Geração cortada no meio. Peça para a IA continuar o arquivo antes de gravar.</span>
         </div>
       )}
 
@@ -406,19 +397,23 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
 
   const parseAgentActions = (rawText: string) => {
     const parts: React.ReactNode[] = [];
+    // REGEX INTELIGENTE: tolera tags cortadas sem fechamento no final
     const writeRegex =
-      /<esperto_write(?:\s+(?:path|file|filepath)=["']?([^"'>\s]+)["']?)?>([\s\S]*?)<\/esperto_write>/gi;
-    const cmdRegex = /<esperto_cmd>([\s\S]*?)<\/esperto_cmd>/gi;
+      /<esperto_write(?:\s+(?:path|file|filepath)=["']?([^"'>\s]+)["']?)?>([\s\S]*?)(?:<\/esperto_write>|$)/gi;
+    const cmdRegex = /<esperto_cmd>([\s\S]*?)(?:<\/esperto_cmd>|$)/gi;
 
     let lastIndex = 0;
-    const fileMatches: { path: string; code: string }[] = [];
+    const fileMatches: { path: string; code: string; isIncomplete: boolean }[] = [];
     const combinedMatches: { index: number; length: number; node: React.ReactNode }[] = [];
 
     let match: RegExpExecArray | null;
     while ((match = writeRegex.exec(rawText)) !== null) {
       const detectedPath = match[1] || 'arquivo-gerado.ts';
       const fileCode = match[2];
-      fileMatches.push({ path: detectedPath, code: fileCode });
+      const hasClosing = match[0].includes('</esperto_write>');
+      const isIncomplete = !hasClosing;
+
+      fileMatches.push({ path: detectedPath, code: fileCode, isIncomplete });
 
       combinedMatches.push({
         index: match.index,
@@ -430,6 +425,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
             content={fileCode}
             baseDirectories={baseDirectories}
             requireConfirmation={requireConfirmation}
+            isIncomplete={isIncomplete}
             onFileWritten={onFileWritten}
             onRequestSelectFolder={onRequestSelectFolder}
           />
@@ -649,7 +645,6 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                   type="button"
                   onClick={handleCopyMessage}
                   className="text-zinc-500 hover:text-zinc-300 transition text-[11px] flex items-center gap-1 cursor-pointer font-mono"
-                  title="Copiar texto"
                 >
                   {copied ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
                   <span>{copied ? 'copiado' : 'copiar'}</span>
@@ -661,7 +656,6 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                   type="button"
                   onClick={() => setIsEditing(true)}
                   className="text-zinc-500 hover:text-zinc-300 transition text-[11px] flex items-center gap-1 cursor-pointer font-mono"
-                  title="Editar mensagem"
                 >
                   <Pencil size={11} />
                   <span>editar</span>
@@ -673,7 +667,6 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                   type="button"
                   onClick={onRetry}
                   className="text-zinc-500 hover:text-zinc-300 transition text-[11px] flex items-center gap-1 cursor-pointer font-mono"
-                  title="Regenerar"
                 >
                   <RotateCcw size={11} />
                   <span>regenerar</span>

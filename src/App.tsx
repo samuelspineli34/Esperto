@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { db, Chat, Message, Settings, Attachment, WorkspacePreset } from './lib/db';
+import { db, Chat, Message, Settings, Attachment, WorkspacePreset, ChatRunSettings } from './lib/db';
 import { streamAIResponse } from './services/ai';
 import { getModelInfo, registerLocalOllamaModels, registerCustomProviderModels } from './lib/models';
 import { getInstalledOllamaModels, ensureOllamaRunning } from './services/ollama';
 import { Sidebar } from './components/Sidebar';
 import { ChatMessage } from './components/ChatMessage';
 import { SettingsModal } from './components/SettingsModal';
+import RunSettingsDrawer from './components/RunSettingsDrawer';
 import { UpdateModal } from './components/UpdateModal';
 import { HelpModal } from './components/HelpModal';
 import { ErrorModal, AppErrorInfo } from './components/ErrorModal';
@@ -27,17 +28,16 @@ import {
   Plus,
   Trash2,
   BookmarkPlus,
-  Cpu,
   FolderSearch,
   ChevronDown,
   Terminal,
   Layers,
   PanelLeftClose,
   PanelLeft,
+  Settings2,
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 
-// PROMPT RIGOROSO: Proíbe expressamente reticências (...), omissões e código parcial
 const AGENT_SYSTEM_PROMPT = `Você é o ESPERTO, um Engenheiro de Software Autônomo e Agente de Código de Alta Performance.
 Você tem acesso direto ao sistema de arquivos do projeto do usuário através da IDE.
 
@@ -49,13 +49,12 @@ conteúdo completo do arquivo
 
 2. PROIBIÇÃO ABSOLUTA DE RETICÊNCIAS OU CÓDIGO PARCIAL:
 NUNCA use "...", "// resto do código", "/* código anterior continua igual */" ou omissões dentro de <esperto_write>.
-Você é OBRIGADO a fornecer o código 100% COMPLETO, desde a primeira linha de imports até a última linha, sem economizar linhas. Se você omitir linhas ou usar "...", o arquivo em disco será destruído e corrompido.
+Você é OBRIGADO a fornecer o código 100% COMPLETO, desde a primeira linha de imports até a última linha. Se você omitir linhas ou usar "...", o arquivo em disco será destruído e corrompido.
 
-3. NUNCA coloque blocos de markdown (\`\`\`) DENTRO da tag <esperto_write>. O conteúdo dentro da tag deve ser EXCLUSIVAMENTE o código-fonte puro.
+3. NUNCA coloque blocos de markdown (\`\`\`) DENTRO da tag <esperto_write>.
 4. NUNCA inicie o código com '#' como comentário se a linguagem for TypeScript, JavaScript, Rust, C, C++, CSS ou JSON.
 5. Para comandos de terminal, use:
-<esperto_cmd>comando aqui</esperto_cmd>
-Coloque apenas comandos executáveis diretos (ex: npm install, cargo build, npx vite build).`;
+<esperto_cmd>comando aqui</esperto_cmd>`;
 
 const defaultSettings: Settings = {
   id: 'default',
@@ -68,7 +67,7 @@ const defaultSettings: Settings = {
   googleSearch: false,
   requireActionConfirmation: true,
   ollamaHost: 'http://127.0.0.1:11434',
-  ollamaContextLength: 32768,
+  ollamaContextLength: 8192,
 };
 
 interface LoadedFile {
@@ -123,11 +122,11 @@ export default function App() {
   const [showSystemPrompt, setShowSystemPrompt] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isRunSettingsOpen, setIsRunSettingsOpen] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [settings, setSettings] = useState<Settings>(defaultSettings);
   const [elapsedTime, setElapsedTime] = useState(0);
 
-  // Controle de Sidebar (Colapso)
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   const [activeError, setActiveError] = useState<AppErrorInfo | null>(null);
@@ -151,7 +150,6 @@ export default function App() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Smart Scroll Lock: detecta se o usuário subiu a barra para ler
   const isUserScrolledUp = useRef(false);
 
   const currentChat = useMemo(() => chats.find((c) => c.id === activeChatId), [chats, activeChatId]);
@@ -166,7 +164,19 @@ export default function App() {
     [activeModelId, settings.customProviders]
   );
 
-  // Atalhos Globais de Produtividade (Ctrl+B, Ctrl+N, Ctrl+, Esc)
+  const currentRunSettings: ChatRunSettings = useMemo(() => {
+    return (
+      currentChat?.runSettings || {
+        temperature: settings.temperature ?? 0.7,
+        topP: settings.topP ?? 0.9,
+        thinkingLevel: settings.thinkingLevel || 'off',
+        googleSearch: settings.googleSearch ?? false,
+        contextLength: settings.ollamaContextLength || 8192,
+        mediaResolution: settings.mediaResolution || 'default',
+      }
+    );
+  }, [currentChat?.runSettings, settings]);
+
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       const isCmdOrCtrl = e.ctrlKey || e.metaKey;
@@ -174,6 +184,9 @@ export default function App() {
       if (isCmdOrCtrl && e.key.toLowerCase() === 'b') {
         e.preventDefault();
         setIsSidebarOpen((prev) => !prev);
+      } else if (isCmdOrCtrl && e.key.toLowerCase() === 'i') {
+        e.preventDefault();
+        setIsRunSettingsOpen((prev) => !prev);
       } else if (isCmdOrCtrl && e.key.toLowerCase() === 'n') {
         e.preventDefault();
         createNewChat();
@@ -183,8 +196,9 @@ export default function App() {
       } else if (e.key === 'Escape') {
         if (isLoading) {
           handleStopGeneration();
-        } else if (isSettingsOpen || isHelpOpen || isUpdateOpen || activeArtifact) {
+        } else {
           setIsSettingsOpen(false);
+          setIsRunSettingsOpen(false);
           setIsHelpOpen(false);
           setIsUpdateOpen(false);
           setActiveArtifact(null);
@@ -194,7 +208,7 @@ export default function App() {
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [isLoading, isSettingsOpen, isHelpOpen, isUpdateOpen, activeArtifact]);
+  }, [isLoading]);
 
   useEffect(() => {
     let interval: any;
@@ -303,15 +317,12 @@ export default function App() {
     loadChatData();
   }, [activeChatId, syncDirectories]);
 
-  // Função que detecta se o usuário rolou para cima
   const handleScrollContainer = () => {
     if (!chatContainerRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = chatContainerRef.current;
-    // Se estiver a mais de 120px do fundo, considera que o usuário está lendo código antigo
     isUserScrolledUp.current = scrollHeight - scrollTop - clientHeight > 120;
   };
 
-  // Smart Auto-Scroll: Só rola se o usuário NÃO tiver rolado para cima
   useEffect(() => {
     if (!isUserScrolledUp.current) {
       chatContainerRef.current?.scrollTo({
@@ -419,18 +430,18 @@ export default function App() {
 
     scoredFiles.sort((a, b) => b.score - a.score);
 
-    const maxBudget = (settings.ollamaContextLength || 32768) > 16384 ? 90000 : 35000;
+    const maxBudget = (currentRunSettings.contextLength || 8192) > 8192 ? 55000 : 25000;
     let accumulatedChars = manifest.length;
     let includedCount = 0;
     let filesContent = '';
 
     for (const f of scoredFiles) {
-      if (f.score <= 0 && includedCount >= 6) break;
+      if (f.score <= 0 && includedCount >= 5) break;
 
       let contentToInclude = f.content;
       const lines = contentToInclude.split('\n');
-      if (lines.length > 400) {
-        contentToInclude = lines.slice(0, 400).join('\n') + `\n\n... [Total: ${lines.length} linhas]`;
+      if (lines.length > 300) {
+        contentToInclude = lines.slice(0, 300).join('\n') + `\n\n... [Total: ${lines.length} linhas]`;
       }
 
       if (accumulatedChars + contentToInclude.length > maxBudget) break;
@@ -457,6 +468,14 @@ export default function App() {
     setActiveChatId(newChat.id);
     setMessages([]);
     isUserScrolledUp.current = false;
+  };
+
+  const handleUpdateRunSettings = async (newRunSettings: ChatRunSettings) => {
+    if (!activeChatId) return;
+    await db.chats.update(activeChatId, { runSettings: newRunSettings });
+    setChats((prev) =>
+      prev.map((c) => (c.id === activeChatId ? { ...c, runSettings: newRunSettings } : c))
+    );
   };
 
   const handleUpdateSystemInstruction = async (val: string) => {
@@ -551,7 +570,6 @@ export default function App() {
     const textToSend = customMessageText !== undefined ? customMessageText : inputMessage;
     if ((!textToSend.trim() && attachments.length === 0) || isLoading || !activeChatId) return;
 
-    // Reseta a trava de rolagem para acompanhar a nova mensagem
     isUserScrolledUp.current = false;
 
     let currentFiles = allLoadedFiles;
@@ -606,10 +624,20 @@ export default function App() {
     let responseText = '';
     const combinedSystemPrompt = `${AGENT_SYSTEM_PROMPT}\n\n${systemInstruction || ''}`;
 
+    const mergedSettings: Settings = {
+      ...settings,
+      temperature: currentRunSettings.temperature ?? settings.temperature,
+      topP: currentRunSettings.topP ?? settings.topP,
+      thinkingLevel: currentRunSettings.thinkingLevel || settings.thinkingLevel,
+      googleSearch: currentRunSettings.googleSearch ?? settings.googleSearch,
+      ollamaContextLength: currentRunSettings.contextLength || settings.ollamaContextLength,
+      mediaResolution: currentRunSettings.mediaResolution || settings.mediaResolution,
+    };
+
     try {
       const generator = streamAIResponse({
         model: activeModelId,
-        settings,
+        settings: mergedSettings,
         systemInstruction: combinedSystemPrompt,
         globalMemory: settings.globalMemory,
         directoryContext: smartContext,
@@ -713,7 +741,7 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#090b10]">
-      {/* Sidebar Colapsável com transição limpa */}
+      {/* Sidebar Colapsável */}
       {isSidebarOpen && (
         <Sidebar
           chats={chats}
@@ -761,7 +789,6 @@ export default function App() {
           className="h-13 border-b border-[#161a25] flex items-center justify-between px-3.5 bg-[#0a0d13] select-none"
         >
           <div className="flex items-center gap-2.5">
-            {/* Botão de Alternância da Sidebar (Expandir Área de Código) */}
             <button
               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
               title={isSidebarOpen ? 'Ocultar Painel Lateral (Ctrl+B)' : 'Mostrar Painel Lateral (Ctrl+B)'}
@@ -770,7 +797,6 @@ export default function App() {
               {isSidebarOpen ? <PanelLeftClose size={15} /> : <PanelLeft size={15} />}
             </button>
 
-            {/* Seletor de Modelo */}
             <button
               onClick={() => setIsSettingsOpen(true)}
               className="h-8 px-2.5 rounded bg-[#131722] hover:bg-[#1a202f] border border-[#232a3d] text-xs font-mono flex items-center gap-2 transition text-zinc-200 cursor-pointer"
@@ -787,7 +813,6 @@ export default function App() {
               <ChevronDown size={11} className="text-zinc-500" />
             </button>
 
-            {/* Medidor de Contexto */}
             <div
               title={`Contexto: ${totalEstimatedTokens.toLocaleString()} de ${(modelInfo.contextLimit / 1000).toFixed(0)}k`}
               className="hidden md:flex items-center gap-1.5 h-8 px-2.5 rounded bg-[#10131b] border border-[#1d2332] text-[11px] font-mono text-zinc-400"
@@ -798,7 +823,7 @@ export default function App() {
               </span>
               <span className="text-zinc-600">/</span>
               <span className="font-bold text-emerald-400">
-                {settings.ollamaContextLength ? `${settings.ollamaContextLength / 1024}k` : '32k'}
+                {currentRunSettings.contextLength ? `${currentRunSettings.contextLength / 1024}k` : '8k'}
               </span>
             </div>
 
@@ -825,18 +850,6 @@ export default function App() {
             </button>
 
             <button
-              onClick={() => setShowSystemPrompt(!showSystemPrompt)}
-              className={`h-8 px-2.5 rounded text-xs font-mono transition flex items-center gap-1.5 border cursor-pointer ${
-                showSystemPrompt || systemInstruction
-                  ? 'bg-[#141a27] text-zinc-200 border-[#26334f]'
-                  : 'bg-[#0d1017] text-zinc-500 border-[#1a202c] hover:text-zinc-300'
-              }`}
-            >
-              <Sliders size={12} />
-              <span>REGRAS</span>
-            </button>
-
-            <button
               onClick={() => setShowDirectoryDrawer(!showDirectoryDrawer)}
               className={`h-8 px-2.5 rounded text-xs font-mono transition flex items-center gap-1.5 border cursor-pointer ${
                 directoryPaths.length > 0
@@ -856,10 +869,22 @@ export default function App() {
                   : 'WORKSPACE'}
               </span>
             </button>
+
+            <button
+              onClick={() => setIsRunSettingsOpen(!isRunSettingsOpen)}
+              title="Abrir Gaveta de Configurações da Sessão (Ctrl+I)"
+              className={`h-8 px-2.5 rounded text-xs font-mono transition flex items-center gap-1.5 border cursor-pointer ${
+                isRunSettingsOpen
+                  ? 'bg-indigo-950/60 text-indigo-300 border-indigo-500/50'
+                  : 'bg-[#0d1017] text-zinc-400 border-[#1a202c] hover:text-white'
+              }`}
+            >
+              <Settings2 size={13} className={isRunSettingsOpen ? 'text-indigo-400' : ''} />
+              <span>RUN SETTINGS</span>
+            </button>
           </div>
         </header>
 
-        {/* Drawer de Pastas do Projeto */}
         {showDirectoryDrawer && (
           <div className="p-4 bg-[#0d1018] border-b border-[#1a2130] transition space-y-3 font-sans">
             <div className="flex items-center justify-between">
@@ -972,90 +997,97 @@ export default function App() {
           </div>
         )}
 
-        {showSystemPrompt && (
-          <div className="p-3 bg-[#0d1018] border-b border-[#1a2130]">
-            <label className="block text-[11px] font-mono text-zinc-400 uppercase tracking-wider mb-1 font-semibold">
-              System Instruction / Persona da Sessão
-            </label>
-            <textarea
-              rows={2}
-              value={systemInstruction}
-              onChange={(e) => handleUpdateSystemInstruction(e.target.value)}
-              placeholder="Instruções de arquitetura de software para este chat..."
-              className="w-full bg-[#080a0f] border border-[#1e2535] rounded p-2 text-xs text-zinc-200 focus:outline-none resize-none font-mono"
-            />
-          </div>
-        )}
+        <div className="flex-1 flex overflow-hidden">
+          <div
+            ref={chatContainerRef}
+            onScroll={handleScrollContainer}
+            className="flex-1 overflow-y-auto"
+          >
+            {messages.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center p-6 text-zinc-500 select-none max-w-xl mx-auto">
+                <div className="w-10 h-10 rounded-lg bg-[#11151f] border border-[#22293b] flex items-center justify-center mb-3 text-zinc-400">
+                  <Terminal size={20} strokeWidth={2} />
+                </div>
 
-        {/* Linha do Tempo com Smart Scroll Lock */}
-        <div
-          ref={chatContainerRef}
-          onScroll={handleScrollContainer}
-          className="flex-1 overflow-y-auto"
-        >
-          {messages.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center p-6 text-zinc-500 select-none max-w-xl mx-auto">
-              <div className="w-10 h-10 rounded-lg bg-[#11151f] border border-[#22293b] flex items-center justify-center mb-3 text-zinc-400">
-                <Terminal size={20} strokeWidth={2} />
-              </div>
+                <h2 className="text-sm font-semibold text-zinc-200 mb-1 font-mono uppercase tracking-wider">
+                  Esperto Code Agent
+                </h2>
+                <p className="text-xs text-zinc-500 mb-6 text-center font-sans">
+                  Agente autônomo com acesso a arquivos locais, execução de shell e inspeção de código.
+                </p>
 
-              <h2 className="text-sm font-semibold text-zinc-200 mb-1 font-mono uppercase tracking-wider">
-                Esperto Code Agent
-              </h2>
-              <p className="text-xs text-zinc-500 mb-6 text-center font-sans">
-                Agente autônomo com acesso a arquivos locais, execução de shell e inspeção de código.
-              </p>
-
-              <div className="grid grid-cols-1 gap-1.5 w-full font-mono text-xs">
-                <button
-                  type="button"
-                  onClick={() =>
-                    handleSendMessage(
-                      'Analise a estrutura do workspace vinculado e liste os principais arquivos e dependências.'
-                    )
-                  }
-                  className="px-3 py-2 bg-[#0e1118] hover:bg-[#141924] border border-[#1b2232] hover:border-[#2e3952] rounded-md text-left transition cursor-pointer flex items-center justify-between text-zinc-300"
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="text-zinc-500">$</span>
-                    <span>esperto --audit-codebase</span>
-                  </div>
-                  <span className="text-[10px] text-zinc-600">inspeção de arquivos</span>
-                </button>
-              </div>
-            </div>
-          ) : (
-            messages.map((msg, index) => (
-              <ChatMessage
-                key={index}
-                role={msg.role}
-                content={msg.content}
-                attachments={msg.attachments}
-                baseDirectories={directoryPaths}
-                requireConfirmation={settings.requireActionConfirmation !== false}
-                onEdit={msg.role === 'user' ? (newText) => handleEditMessage(index, newText) : undefined}
-                onRetry={msg.role === 'model' && index === messages.length - 1 ? handleRetryLastMessage : undefined}
-                onOpenArtifact={(code, lang) => setActiveArtifact({ code, language: lang })}
-                onFileWritten={() => syncDirectories(directoryPaths)}
-                onRequestSelectFolder={handleBrowseFolder}
-              />
-            ))
-          )}
-
-          {isLoading && messages[messages.length - 1]?.content === '' && (
-            <div className="px-6 py-4 border-b border-[#131722] bg-[#090c12]">
-              <div className="max-w-4xl mx-auto flex gap-3.5 items-center">
-                <span className="font-mono text-[11px] font-semibold tracking-wider text-indigo-400 uppercase w-16 shrink-0">
-                  Esperto
-                </span>
-                <div className="flex items-center gap-2 text-xs font-mono text-zinc-400">
-                  <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-ping" />
-                  <span>inferindo tokens...</span>
-                  <span className="text-zinc-600">({elapsedTime.toFixed(1)}s)</span>
+                <div className="grid grid-cols-1 gap-1.5 w-full font-mono text-xs">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleSendMessage(
+                        'Analise a estrutura do workspace vinculado e liste os principais arquivos e dependências.'
+                      )
+                    }
+                    className="px-3 py-2 bg-[#0e1118] hover:bg-[#141924] border border-[#1b2232] hover:border-[#2e3952] rounded-md text-left transition cursor-pointer flex items-center justify-between text-zinc-300"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-zinc-500">$</span>
+                      <span>esperto --audit-codebase</span>
+                    </div>
+                    <span className="text-[10px] text-zinc-600">inspeção de arquivos</span>
+                  </button>
                 </div>
               </div>
-            </div>
-          )}
+            ) : (
+              messages.map((msg, index) => (
+                <ChatMessage
+                  key={index}
+                  role={msg.role}
+                  content={msg.content}
+                  attachments={msg.attachments}
+                  baseDirectories={directoryPaths}
+                  requireConfirmation={settings.requireActionConfirmation !== false}
+                  onEdit={msg.role === 'user' ? (newText) => handleEditMessage(index, newText) : undefined}
+                  onRetry={msg.role === 'model' && index === messages.length - 1 ? handleRetryLastMessage : undefined}
+                  onOpenArtifact={(code, lang) => setActiveArtifact({ code, language: lang })}
+                  onFileWritten={() => syncDirectories(directoryPaths)}
+                  onRequestSelectFolder={handleBrowseFolder}
+                />
+              ))
+            )}
+
+            {isLoading && messages[messages.length - 1]?.content === '' && (
+              <div className="px-6 py-4 border-b border-[#131722] bg-[#090c12]">
+                <div className="max-w-4xl mx-auto flex gap-3.5 items-center">
+                  <span className="font-mono text-[11px] font-semibold tracking-wider text-indigo-400 uppercase w-16 shrink-0">
+                    Esperto
+                  </span>
+                  <div className="flex items-center gap-2 text-xs font-mono text-zinc-400">
+                    <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-ping" />
+                    <span>inferindo tokens...</span>
+                    <span className="text-zinc-600">({elapsedTime.toFixed(1)}s)</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* GAVETA LATERAL DIREITA DE PARÂMETROS */}
+          <RunSettingsDrawer
+            isOpen={isRunSettingsOpen}
+            onClose={() => setIsRunSettingsOpen(false)}
+            modelId={activeModelId}
+            runSettings={currentRunSettings}
+            systemInstruction={systemInstruction}
+            onUpdateRunSettings={handleUpdateRunSettings}
+            onUpdateSystemInstruction={handleUpdateSystemInstruction}
+            onResetToDefaults={() => {
+              handleUpdateRunSettings({
+                temperature: 0.7,
+                topP: 0.9,
+                thinkingLevel: 'off',
+                googleSearch: false,
+                contextLength: 8192,
+                mediaResolution: 'default',
+              });
+            }}
+          />
         </div>
 
         {/* Input Bar */}

@@ -15,6 +15,17 @@ export interface WorkspacePreset {
   createdAt: number;
 }
 
+export interface ChatRunSettings {
+  temperature?: number;
+  topP?: number;
+  maxOutputTokens?: number;
+  thinkingLevel?: 'off' | 'low' | 'medium' | 'high';
+  googleSearch?: boolean;
+  contextLength?: number;
+  mediaResolution?: 'default' | 'low' | 'medium' | 'high'; // Corrigido: adicionado 'medium'
+  stopSequences?: string[];
+}
+
 export interface Chat {
   id: string;
   title: string;
@@ -22,6 +33,7 @@ export interface Chat {
   directoryPaths?: string[];
   useMemory?: boolean;
   model?: string;
+  runSettings?: ChatRunSettings;
   createdAt: number;
 }
 
@@ -63,7 +75,7 @@ export interface Settings {
   // Segurança do Agente
   requireActionConfirmation?: boolean;
 
-  // Parâmetros de Inferência
+  // Parâmetros Globais Padrão
   temperature?: number;
   topP?: number;
   maxOutputTokens?: number;
