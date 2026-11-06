@@ -52,10 +52,6 @@ export async function startOllama(customPath?: string, customHost?: string): Pro
   return await invoke<string>('start_ollama_service', { customPath, customHost });
 }
 
-/**
- * Garante que o Ollama está online em segundo plano.
- * Se estiver fechado, inicia o processo de forma invisível.
- */
 export async function ensureOllamaRunning(customHost?: string, customPath?: string): Promise<boolean> {
   const isOnline = await checkOllamaRunning(customHost);
   if (isOnline) return true;
@@ -100,7 +96,7 @@ export async function pullOllamaModel(
   });
 
   if (!res.ok) {
-    throw new Error(`Falha ao baixar modelo (${res.status}): ${await res.text()}`);
+    throw new Error(`Falha ao conectar com o Ollama (${res.status}): ${await res.text()}`);
   }
 
   const reader = res.body?.getReader();
@@ -118,17 +114,26 @@ export async function pullOllamaModel(
 
     for (const line of lines) {
       if (line.trim()) {
-        try {
-          const data = JSON.parse(line);
-          const status = data.status || 'Baixando...';
-          let percent = 0;
-          if (data.total && data.completed) {
-            percent = Math.round((data.completed / data.total) * 100);
-          }
-          if (onProgress) {
-            onProgress(percent, status);
-          }
-        } catch (_) {}
+        const data = JSON.parse(line);
+
+        // Se o Ollama reportar erro (ex: repositório sem GGUF ou inexistente), estoura erro real
+        if (data.error) {
+          throw new Error(data.error);
+        }
+
+        let statusText = data.status || 'Baixando...';
+        let percent = 0;
+
+        if (data.total && data.completed) {
+          percent = Math.round((data.completed / data.total) * 100);
+          const mbCompleted = (data.completed / 1024 / 1024).toFixed(0);
+          const mbTotal = (data.total / 1024 / 1024).toFixed(0);
+          statusText = `${data.status || 'Baixando'} (${mbCompleted}MB de ${mbTotal}MB)`;
+        }
+
+        if (onProgress) {
+          onProgress(percent, statusText);
+        }
       }
     }
   }
@@ -189,7 +194,6 @@ export async function* streamOllama({
   customPath,
   signal,
 }: StreamOptions) {
-  // Garante que o Ollama subiu antes de disparar o prompt
   await ensureOllamaRunning(customHost, customPath);
 
   const host = (customHost || DEFAULT_OLLAMA_HOST).replace(/\/+$/, '');
@@ -249,7 +253,7 @@ export async function* streamOllama({
       signal,
     });
   } catch (err: any) {
-    throw new Error(`Não foi possível conectar ao Ollama em ${host}. O serviço foi reiniciado, tente enviar novamente.`);
+    throw new Error(`Não foi possível conectar ao Ollama em ${host}.`);
   }
 
   if (!res.ok) {
