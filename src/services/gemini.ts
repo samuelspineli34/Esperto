@@ -88,9 +88,8 @@ export async function* streamGemini({
     } catch (imgErr: any) {
       if (signal?.aborted) return;
 
-      yield `\n\n*(Aviso: Falha ao gerar imagem nativa: ${
-        imgErr?.message || 'Erro desconhecido'
-      }. Tentando processar como chat normal...)*\n\n`;
+      yield `\n\n*(Aviso: Falha ao gerar imagem nativa: ${imgErr?.message || 'Erro desconhecido'
+        }. Tentando processar como chat normal...)*\n\n`;
     }
   }
 
@@ -191,8 +190,7 @@ export async function* streamGemini({
         const finishReason = response.candidates?.[0]?.finishReason;
 
         throw new Error(
-          `Gemini não retornou texto. Motivo: ${
-            finishReason || 'Resposta vazia'
+          `Gemini não retornou texto. Motivo: ${finishReason || 'Resposta vazia'
           }`
         );
       }
