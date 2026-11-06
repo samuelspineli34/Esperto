@@ -7,6 +7,7 @@ import { streamDeepSeek } from './deepseek';
 import { streamOpenRouter } from './openrouter';
 import { streamOllama } from './ollama';
 import { streamCustomProvider } from './custom';
+import { invoke } from '@tauri-apps/api/core';
 
 export interface StreamOptions {
   model: string;

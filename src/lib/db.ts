@@ -31,6 +31,7 @@ export interface Chat {
   title: string;
   systemInstruction?: string;
   directoryPaths?: string[];
+  ignoredPaths?: string[];
   useMemory?: boolean;
   model?: string;
   runSettings?: ChatRunSettings;

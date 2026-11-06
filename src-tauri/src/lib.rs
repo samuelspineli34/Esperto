@@ -43,35 +43,41 @@ fn should_ignore(path_str: &str) -> bool {
         || lower.ends_with(".wasm")
 }
 
-fn collect_files(base_path: &Path, current_path: &Path, results: &mut Vec<FileContext>, max_files: usize) {
-    if results.len() >= max_files {
-        return;
+#[tauri::command]
+fn read_multiple_directories(dir_paths: Vec<String>, ignore_list: Vec<String>) -> Result<Vec<FileContext>, String> {
+    let mut all_files = Vec::new();
+    for dir in dir_paths {
+        let clean = dir.trim();
+        if clean.is_empty() { continue; }
+        
+        let path = Path::new(clean);
+        if path.exists() && path.is_dir() {
+            // Função interna atualizada para aceitar o ignore_list
+            collect_files_with_ignore(path, path, &mut all_files, 400, &ignore_list);
+        }
     }
+    Ok(all_files)
+}
+
+fn collect_files_with_ignore(base_path: &Path, current_path: &Path, results: &mut Vec<FileContext>, max: usize, ignores: &[String]) {
+    if results.len() >= max { return; }
+    
     if let Ok(entries) = fs::read_dir(current_path) {
         for entry in entries.flatten() {
             let path = entry.path();
-            let path_str = path.to_string_lossy().to_string();
+            let path_str = path.to_string_lossy().to_lowercase();
 
-            if should_ignore(&path_str) {
+            // Filtro rígido + Filtro customizado do usuário
+            if should_ignore(&path_str) || ignores.iter().any(|i| path_str.contains(&i.to_lowercase())) {
                 continue;
             }
 
             if path.is_dir() {
-                collect_files(base_path, &path, results, max_files);
-            } else if path.is_file() {
-                if let Ok(metadata) = fs::metadata(&path) {
-                    if metadata.len() > 350_000 {
-                        continue;
-                    }
-                }
+                collect_files_with_ignore(base_path, &path, results, max, ignores);
+            } else if path.is_file() && path.metadata().map(|m| m.len() < 350_000).unwrap_or(false) {
                 if let Ok(content) = fs::read_to_string(&path) {
-                    let rel_path = path
-                        .strip_prefix(base_path)
-                        .unwrap_or(&path)
-                        .to_string_lossy()
-                        .to_string();
                     results.push(FileContext {
-                        path: rel_path,
+                        path: path.strip_prefix(base_path).unwrap_or(&path).to_string_lossy().into_owned(),
                         content,
                     });
                 }
