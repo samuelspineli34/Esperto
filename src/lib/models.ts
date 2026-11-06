@@ -1,5 +1,5 @@
 import { OllamaModelTag } from '../services/ollama';
-import type { CustomProviderConfig } from './db';
+import type { CustomProviderConfig, Settings } from './db';
 
 export type Provider = 'gemini' | 'openai' | 'anthropic' | 'deepseek' | 'openrouter' | 'ollama' | 'custom';
 export type PricingType = 'free_tier' | 'paid_only';
@@ -33,121 +33,44 @@ export interface ModelCapabilities {
   mediaLockReason?: string;
 }
 
-export const STATIC_MODELS: AIModel[] = [
-  {
-    id: 'openrouter/free',
-    name: 'OpenRouter: Free Router',
-    provider: 'openrouter',
-    description: 'Roteador inteligente que seleciona automaticamente o melhor modelo gratuito.',
-    contextLimit: 128000,
-    pricing: 'free_tier',
-    inputPrice: 0,
-    outputPrice: 0,
-    priceNote: '100% Gratuito',
-    supportsImages: true,
-    supportsSearch: false,
-  },
+// Fallbacks essenciais caso a internet esteja indisponível ao iniciar
+const STATIC_FALLBACK_MODELS: AIModel[] = [
   {
     id: 'gemini-3.7-flash',
     name: 'Gemini 3.7 Flash',
     provider: 'gemini',
-    description: 'Mais moderno da Google para coding, agentes e raciocínio com Thinking.',
+    description: 'Mais moderno da Google para coding e agentes.',
     contextLimit: 250000,
     pricing: 'free_tier',
     inputPrice: 0,
     outputPrice: 0,
-    priceNote: 'Cota gratuita disponível no AI Studio',
-    supportsImages: true,
-    supportsSearch: true,
-  },
-  {
-    id: 'gemini-3.6-flash',
-    name: 'Gemini 3.6 Flash',
-    provider: 'gemini',
-    description: 'Rápido, multimodal e estável para tarefas rotineiras de código.',
-    contextLimit: 250000,
-    pricing: 'free_tier',
-    inputPrice: 0,
-    outputPrice: 0,
-    priceNote: 'Cota gratuita disponível',
+    priceNote: 'Cota gratuita Google AI Studio',
     supportsImages: true,
     supportsSearch: true,
   },
   {
     id: 'claude-3-7-sonnet-latest',
-    name: 'Claude 3.7 Sonnet (Direto)',
+    name: 'Claude 3.7 Sonnet',
     provider: 'anthropic',
-    description: 'Líder em arquitetura de software com suporte a Extended Thinking.',
+    description: 'Líder em arquitetura de software.',
     contextLimit: 200000,
     pricing: 'paid_only',
     inputPrice: 3.0,
     outputPrice: 15.0,
-    priceNote: '$3.00 / $15.00 por 1M',
+    priceNote: 'Anthropic API',
     supportsImages: true,
-    supportsSearch: false,
-  },
-  {
-    id: 'claude-3-5-sonnet-latest',
-    name: 'Claude 3.5 Sonnet (Direto)',
-    provider: 'anthropic',
-    description: 'Referência clássica para programação, testes e refatoração.',
-    contextLimit: 200000,
-    pricing: 'paid_only',
-    inputPrice: 3.0,
-    outputPrice: 15.0,
-    priceNote: '$3.00 / $15.00 por 1M',
-    supportsImages: true,
-    supportsSearch: false,
-  },
-  {
-    id: 'gpt-4o',
-    name: 'GPT-4o (Direto)',
-    provider: 'openai',
-    description: 'Modelo omnimodal equilibrado com excelente interpretação visual.',
-    contextLimit: 128000,
-    pricing: 'paid_only',
-    inputPrice: 2.5,
-    outputPrice: 10.0,
-    priceNote: '$2.50 / $10.00 por 1M',
-    supportsImages: true,
-    supportsSearch: false,
-  },
-  {
-    id: 'o3-mini',
-    name: 'OpenAI o3 Mini',
-    provider: 'openai',
-    description: 'Raciocínio lógico, matemático e algoritmos via Chain of Thought.',
-    contextLimit: 200000,
-    pricing: 'paid_only',
-    inputPrice: 1.1,
-    outputPrice: 4.4,
-    priceNote: '$1.10 / $4.40 por 1M',
-    supportsImages: false,
-    supportsSearch: false,
-  },
-  {
-    id: 'deepseek-chat',
-    name: 'DeepSeek V3 (Direto)',
-    provider: 'deepseek',
-    description: 'Excelente capacidade de raciocínio com custo de inferência ultrabaixo.',
-    contextLimit: 64000,
-    pricing: 'paid_only',
-    inputPrice: 0.14,
-    outputPrice: 0.28,
-    priceNote: '$0.14 / $0.28 por 1M',
-    supportsImages: false,
     supportsSearch: false,
   },
   {
     id: 'deepseek-reasoner',
-    name: 'DeepSeek R1 (Direto)',
+    name: 'DeepSeek R1',
     provider: 'deepseek',
-    description: 'Raciocínio matemático e algoritmo profundo com passo a passo aberto.',
+    description: 'Raciocínio lógico e matemático profundo.',
     contextLimit: 64000,
     pricing: 'paid_only',
     inputPrice: 0.55,
     outputPrice: 2.19,
-    priceNote: '$0.55 / $2.19 por 1M',
+    priceNote: 'DeepSeek API',
     supportsImages: false,
     supportsSearch: false,
   },
@@ -155,7 +78,9 @@ export const STATIC_MODELS: AIModel[] = [
 
 let customModelsCache: AIModel[] = [];
 let localOllamaModelsCache: AIModel[] = [];
-export let AVAILABLE_MODELS: AIModel[] = [...STATIC_MODELS];
+let dynamicCloudModelsCache: AIModel[] = [];
+
+export let AVAILABLE_MODELS: AIModel[] = [...STATIC_FALLBACK_MODELS];
 
 type ModelChangeListener = () => void;
 const listeners: ModelChangeListener[] = [];
@@ -169,8 +94,156 @@ export function subscribeModelChanges(listener: ModelChangeListener) {
 }
 
 function notifyListeners() {
-  AVAILABLE_MODELS = [...customModelsCache, ...localOllamaModelsCache, ...STATIC_MODELS];
+  const uniqueMap = new Map();
+  // Prioridade: Dinâmicos da Nuvem + Customizados + Ollama Local + Fallbacks Estáticos
+  [...dynamicCloudModelsCache, ...customModelsCache, ...localOllamaModelsCache, ...STATIC_FALLBACK_MODELS].forEach((m) => {
+    if (!uniqueMap.has(m.id)) uniqueMap.set(m.id, m);
+  });
+  AVAILABLE_MODELS = Array.from(uniqueMap.values());
   listeners.forEach((l) => l());
+}
+
+/**
+ * Consulta em tempo real as APIs de nuvem para carregar novos modelos sem atualizar o app
+ */
+export async function loadDynamicCloudModels(settings: Settings) {
+  const fetchedModels: AIModel[] = [];
+
+  // 1. OpenRouter (Catálogo público global com centenas de modelos)
+  try {
+    const res = await fetch('https://openrouter.ai/api/v1/models', {
+      signal: AbortSignal.timeout(6000),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.data)) {
+        data.data.forEach((m: any) => {
+          const isFree = m.id.endsWith(':free') || (m.pricing && parseFloat(m.pricing.prompt || '1') === 0);
+          fetchedModels.push({
+            id: m.id,
+            name: `OpenRouter: ${m.name || m.id}`,
+            provider: 'openrouter',
+            description: m.description || 'Modelo via OpenRouter Hub',
+            contextLimit: m.context_length || 128000,
+            pricing: isFree ? 'free_tier' : 'paid_only',
+            inputPrice: m.pricing ? parseFloat(m.pricing.prompt || '0') * 1000000 : 2.0,
+            outputPrice: m.pricing ? parseFloat(m.pricing.completion || '0') * 1000000 : 8.0,
+            priceNote: isFree ? '100% Gratuito (OpenRouter)' : 'Saldo OpenRouter',
+            supportsImages: true,
+            supportsSearch: false,
+          });
+        });
+      }
+    }
+  } catch (e) {
+    console.warn('OpenRouter dynamic fetch:', e);
+  }
+
+  // 2. Google Gemini (Lista modelos dinâmicos da chave do usuário)
+  if (settings.geminiApiKey) {
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models?key=${settings.geminiApiKey.trim()}`,
+        { signal: AbortSignal.timeout(5000) }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.models)) {
+          data.models.forEach((m: any) => {
+            const cleanName = m.name?.replace('models/', '') || '';
+            if (cleanName) {
+              fetchedModels.push({
+                id: cleanName,
+                name: `Gemini: ${m.displayName || cleanName}`,
+                provider: 'gemini',
+                description: m.description || 'Modelo oficial Google Gemini',
+                contextLimit: m.inputTokenLimit || 250000,
+                pricing: 'free_tier',
+                inputPrice: 0,
+                outputPrice: 0,
+                priceNote: 'Cota Google AI Studio',
+                supportsImages: true,
+                supportsSearch: true,
+              });
+            }
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('Gemini dynamic fetch:', e);
+    }
+  }
+
+  // 3. OpenAI (Lista modelos dinâmicos da conta)
+  if (settings.openaiApiKey) {
+    try {
+      const res = await fetch('https://api.openai.com/v1/models', {
+        headers: { Authorization: `Bearer ${settings.openaiApiKey.trim()}` },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.data)) {
+          data.data.forEach((m: any) => {
+            if (m.id.includes('gpt') || m.id.includes('o1') || m.id.includes('o3') || m.id.includes('chatgpt')) {
+              fetchedModels.push({
+                id: m.id,
+                name: `OpenAI: ${m.id}`,
+                provider: 'openai',
+                description: 'Modelo oficial OpenAI',
+                contextLimit: 128000,
+                pricing: 'paid_only',
+                inputPrice: 2.5,
+                outputPrice: 10.0,
+                priceNote: 'Conta OpenAI',
+                supportsImages: true,
+                supportsSearch: false,
+              });
+            }
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('OpenAI dynamic fetch:', e);
+    }
+  }
+
+  // 4. DeepSeek (Lista modelos dinâmicos da conta)
+  if (settings.deepseekApiKey) {
+    try {
+      const res = await fetch('https://api.deepseek.com/models', {
+        headers: { Authorization: `Bearer ${settings.deepseekApiKey.trim()}` },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const items = data.data || data.models || [];
+        if (Array.isArray(items)) {
+          items.forEach((m: any) => {
+            const mId = m.id || m.name;
+            fetchedModels.push({
+              id: mId,
+              name: `DeepSeek: ${mId}`,
+              provider: 'deepseek',
+              description: 'Modelo oficial DeepSeek',
+              contextLimit: 64000,
+              pricing: 'paid_only',
+              inputPrice: 0.14,
+              outputPrice: 0.28,
+              priceNote: 'Conta DeepSeek',
+              supportsImages: false,
+              supportsSearch: false,
+            });
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('DeepSeek dynamic fetch:', e);
+    }
+  }
+
+  dynamicCloudModelsCache = fetchedModels;
+  notifyListeners();
 }
 
 export function registerCustomProviderModels(providers: CustomProviderConfig[] = []) {
@@ -268,7 +341,7 @@ export function getModelInfo(modelId: string, customProviders?: CustomProviderCo
     id: modelId,
     name: modelId,
     provider: getProviderByModel(modelId),
-    description: 'Modelo configurado',
+    description: 'Modelo dinâmico',
     contextLimit: 128000,
     pricing: 'paid_only',
     inputPrice: 2.0,
@@ -278,61 +351,37 @@ export function getModelInfo(modelId: string, customProviders?: CustomProviderCo
   };
 }
 
-/**
- * Avalia as capacidades de um modelo para aplicar travas e cadeados dinâmicos
- */
 export function getModelCapabilities(modelId: string): ModelCapabilities {
   const lower = modelId.toLowerCase();
   const provider = getProviderByModel(modelId);
 
-  // Modelos de raciocínio puro com amostragem fixa (proíbem mexer na temperatura)
   const isReasoningModel =
     lower.includes('deepseek-reasoner') ||
     lower.includes('deepseek-r1') ||
     lower.startsWith('o1') ||
     lower.startsWith('o3');
 
-  // Suporte a Thinking configurável
   const supportsThinking =
     lower.includes('gemini-3') ||
     lower.includes('claude-3-7') ||
     lower.startsWith('o1') ||
     lower.startsWith('o3');
 
-  // Grounding com busca no Google
   const supportsSearch = provider === 'gemini';
-
-  // Ajuste manual de VRAM/contexto
   const supportsContextAdjustment = provider === 'ollama' || provider === 'custom';
-
-  // Multimodal de imagens
   const supportsMediaResolution =
     provider === 'gemini' || lower.includes('vl') || lower.includes('vision') || lower.includes('gpt-4o');
 
   return {
     supportsTemperature: !isReasoningModel,
-    temperatureLockReason: isReasoningModel
-      ? 'Modelos de raciocínio usam amostragem fixa para manter a coerência da cadeia lógica.'
-      : undefined,
-
+    temperatureLockReason: isReasoningModel ? 'Modelos de raciocínio usam amostragem fixa.' : undefined,
     supportsThinking,
-    thinkingLockReason: !supportsThinking
-      ? 'Este modelo não possui camada de raciocínio adaptativo (Thinking).'
-      : undefined,
-
+    thinkingLockReason: !supportsThinking ? 'Este modelo não suporta Thinking/CoT.' : undefined,
     supportsSearch,
-    searchLockReason: !supportsSearch
-      ? 'A pesquisa no Google (Grounding) é um recurso exclusivo dos modelos Google Gemini.'
-      : undefined,
-
+    searchLockReason: !supportsSearch ? 'Grounding com Google Search exclusivo para Gemini.' : undefined,
     supportsContextAdjustment,
-    contextLockReason: !supportsContextAdjustment
-      ? 'Modelos em nuvem possuem janela de contexto pré-fixada pelo provedor.'
-      : undefined,
-
+    contextLockReason: !supportsContextAdjustment ? 'Contexto fixo na nuvem.' : undefined,
     supportsMediaResolution,
-    mediaLockReason: !supportsMediaResolution
-      ? 'Modelo textual puro. Não processa imagens ou documentos visuais.'
-      : undefined,
+    mediaLockReason: !supportsMediaResolution ? 'Modelo textual puro.' : undefined,
   };
 }

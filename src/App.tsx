@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { db, Chat, Message, Settings, Attachment, WorkspacePreset, ChatRunSettings } from './lib/db';
 import { streamAIResponse } from './services/ai';
-import { getModelInfo, registerLocalOllamaModels, registerCustomProviderModels } from './lib/models';
+import { getModelInfo, registerLocalOllamaModels, registerCustomProviderModels, loadDynamicCloudModels } from './lib/models';
 import { getInstalledOllamaModels, ensureOllamaRunning } from './services/ollama';
 import { Sidebar } from './components/Sidebar';
 import { ChatMessage } from './components/ChatMessage';
@@ -249,6 +249,7 @@ export default function App() {
       if (savedSettings) {
         setSettings(savedSettings);
         registerCustomProviderModels(savedSettings.customProviders || []);
+        loadDynamicCloudModels(savedSettings);
       } else {
         await db.settings.put(defaultSettings);
       }
@@ -802,9 +803,8 @@ export default function App() {
               className="h-8 px-2.5 rounded bg-[#131722] hover:bg-[#1a202f] border border-[#232a3d] text-xs font-mono flex items-center gap-2 transition text-zinc-200 cursor-pointer"
             >
               <div
-                className={`w-2 h-2 rounded-full ${
-                  modelInfo.isLocal ? 'bg-emerald-400' : 'bg-indigo-400'
-                }`}
+                className={`w-2 h-2 rounded-full ${modelInfo.isLocal ? 'bg-emerald-400' : 'bg-indigo-400'
+                  }`}
               />
               <span className="font-medium truncate max-w-40">{modelInfo.name}</span>
               <span className="text-[10px] text-zinc-500 uppercase">
@@ -839,11 +839,10 @@ export default function App() {
             <button
               onClick={toggleMemory}
               title={useMemory ? 'Memória Global Ativa' : 'Memória Desativada'}
-              className={`h-8 px-2.5 rounded text-xs font-mono transition flex items-center gap-1.5 border cursor-pointer ${
-                useMemory
+              className={`h-8 px-2.5 rounded text-xs font-mono transition flex items-center gap-1.5 border cursor-pointer ${useMemory
                   ? 'bg-[#141a27] text-zinc-200 border-[#26334f]'
                   : 'bg-[#0d1017] text-zinc-500 border-[#1a202c] hover:text-zinc-400'
-              }`}
+                }`}
             >
               <Brain size={12} className={useMemory ? 'text-indigo-400' : ''} />
               <span>{useMemory ? 'MEM_ON' : 'MEM_OFF'}</span>
@@ -851,11 +850,10 @@ export default function App() {
 
             <button
               onClick={() => setShowDirectoryDrawer(!showDirectoryDrawer)}
-              className={`h-8 px-2.5 rounded text-xs font-mono transition flex items-center gap-1.5 border cursor-pointer ${
-                directoryPaths.length > 0
+              className={`h-8 px-2.5 rounded text-xs font-mono transition flex items-center gap-1.5 border cursor-pointer ${directoryPaths.length > 0
                   ? 'bg-[#111e19] text-emerald-300 border-[#1f3d30]'
                   : 'bg-[#0d1017] text-zinc-500 border-[#1a202c] hover:text-zinc-300'
-              }`}
+                }`}
               title="Vincular Workspace de Código"
             >
               {directoryPaths.length > 0 ? (
@@ -873,11 +871,10 @@ export default function App() {
             <button
               onClick={() => setIsRunSettingsOpen(!isRunSettingsOpen)}
               title="Abrir Gaveta de Configurações da Sessão (Ctrl+I)"
-              className={`h-8 px-2.5 rounded text-xs font-mono transition flex items-center gap-1.5 border cursor-pointer ${
-                isRunSettingsOpen
+              className={`h-8 px-2.5 rounded text-xs font-mono transition flex items-center gap-1.5 border cursor-pointer ${isRunSettingsOpen
                   ? 'bg-indigo-950/60 text-indigo-300 border-indigo-500/50'
                   : 'bg-[#0d1017] text-zinc-400 border-[#1a202c] hover:text-white'
-              }`}
+                }`}
             >
               <Settings2 size={13} className={isRunSettingsOpen ? 'text-indigo-400' : ''} />
               <span>RUN SETTINGS</span>
