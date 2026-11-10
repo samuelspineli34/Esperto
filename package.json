@@ -34,7 +34,8 @@
     "tauri:build": "tauri build",
     "setup:local-ai": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-local-ai.ps1",
     "setup:search": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-searxng.ps1",
-    "test:local-ai": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-local-ai.ps1"
+    "test:local-ai": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-local-ai.ps1",
+    "tauri:build:signed": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps1"
   },
   "dependencies": {
     "@google/genai": "^2.18.0",

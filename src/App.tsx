@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { db, Chat, Message, Settings, Attachment, WorkspacePreset, ChatRunSettings } from './lib/db';
 import { streamAIResponse } from './services/ai';
-import { getModelInfo, registerLocalOllamaModels, registerCustomProviderModels, loadDynamicCloudModels } from './lib/models';
+import { AVAILABLE_MODELS, getModelInfo, registerLocalOllamaModels, registerCustomProviderModels, loadDynamicCloudModels, subscribeModelChanges } from './lib/models';
 import { getInstalledOllamaModels, ensureOllamaRunning } from './services/ollama';
 import { Sidebar } from './components/Sidebar';
 import { ChatMessage } from './components/ChatMessage';
@@ -11,6 +11,8 @@ import { UpdateModal } from './components/UpdateModal';
 import { HelpModal } from './components/HelpModal';
 import { ErrorModal, AppErrorInfo } from './components/ErrorModal';
 import { ArtifactPreview } from './components/ArtifactPreview';
+import { WelcomePanel } from './components/WelcomePanel';
+import { CommandPalette, type PaletteCommand, type PaletteSearchResult } from './components/CommandPalette';
 import { checkForUpdates, ReleaseInfo } from './services/updater';
 import {
   Send,
@@ -35,6 +37,17 @@ import {
   PanelLeftClose,
   PanelLeft,
   Settings2,
+  Command as CommandIcon,
+  Search,
+  RefreshCw,
+  Cpu,
+  Code2,
+  Bug,
+  FileSearch,
+  Gauge,
+  FolderPlus,
+  MessageSquare,
+  Zap,
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 
@@ -131,6 +144,8 @@ export default function App() {
   const [elapsedTime, setElapsedTime] = useState(0);
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [paletteModels, setPaletteModels] = useState([...AVAILABLE_MODELS]);
 
   const [activeError, setActiveError] = useState<AppErrorInfo | null>(null);
   const [isUpdateOpen, setIsUpdateOpen] = useState(false);
@@ -184,7 +199,10 @@ export default function App() {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       const isCmdOrCtrl = e.ctrlKey || e.metaKey;
 
-      if (isCmdOrCtrl && e.key.toLowerCase() === 'b') {
+      if (isCmdOrCtrl && e.shiftKey && e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        setIsCommandPaletteOpen(true);
+      } else if (isCmdOrCtrl && e.key.toLowerCase() === 'b') {
         e.preventDefault();
         setIsSidebarOpen((prev) => !prev);
       } else if (isCmdOrCtrl && e.key.toLowerCase() === 'i') {
@@ -197,7 +215,9 @@ export default function App() {
         e.preventDefault();
         setIsSettingsOpen(true);
       } else if (e.key === 'Escape') {
-        if (isLoading) {
+        if (isCommandPaletteOpen) {
+          setIsCommandPaletteOpen(false);
+        } else if (isLoading) {
           handleStopGeneration();
         } else {
           setIsSettingsOpen(false);
@@ -211,7 +231,7 @@ export default function App() {
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [isLoading]);
+  }, [isLoading, isCommandPaletteOpen]);
 
   useEffect(() => {
     let interval: any;
@@ -234,6 +254,8 @@ export default function App() {
     charCount += inputMessage.length;
     return Math.ceil(charCount / 3.8);
   }, [messages, inputMessage, systemInstruction, settings.globalMemory]);
+
+  useEffect(() => subscribeModelChanges(() => setPaletteModels([...AVAILABLE_MODELS])), []);
 
   useEffect(() => {
     const initLocalModels = async () => {
@@ -749,6 +771,124 @@ export default function App() {
     setIsCheckingUpdate(false);
   };
 
+  const handlePaletteModelSelect = async (modelId: string) => {
+    if (activeChatId) {
+      await db.chats.update(activeChatId, { model: modelId });
+      setChats((previous) => previous.map((chat) => chat.id === activeChatId ? { ...chat, model: modelId } : chat));
+    } else {
+      await handleSaveSettings({ ...settings, model: modelId });
+    }
+  };
+
+  const handlePaletteSearchConversations = useCallback(async (query: string): Promise<PaletteSearchResult[]> => {
+    const term = query.trim().toLowerCase();
+    if (term.length < 3) return [];
+    const matchingMessages = await db.messages
+      .toCollection()
+      .reverse()
+      .filter((message) => message.content.toLowerCase().includes(term))
+      .limit(40)
+      .toArray();
+    const seen = new Set<string>();
+    const results: PaletteSearchResult[] = [];
+    for (const message of matchingMessages) {
+      if (seen.has(message.chatId)) continue;
+      const chat = chats.find((item) => item.id === message.chatId);
+      if (!chat) continue;
+      seen.add(message.chatId);
+      const excerpt = message.content.replace(/\s+/g, ' ').trim();
+      results.push({
+        id: chat.id,
+        title: chat.title,
+        description: `${message.role === 'user' ? 'You' : 'Esperto'}: ${excerpt.slice(0, 110)}${excerpt.length > 110 ? '…' : ''}`,
+        onSelect: () => setActiveChatId(chat.id),
+      });
+      if (results.length >= 8) break;
+    }
+    return results;
+  }, [chats]);
+
+  const paletteCommands: PaletteCommand[] = [
+    {
+      id: 'new-chat', title: 'Create new session', description: 'Start a clean conversation.', group: 'Navigation',
+      keywords: ['new', 'chat', 'conversation', 'session'], icon: <MessageSquare size={15} />, shortcut: 'Ctrl N',
+      onSelect: createNewChat,
+    },
+    {
+      id: 'open-settings', title: 'Open settings', description: 'Configure providers, models, local AI, and preferences.', group: 'Navigation',
+      keywords: ['preferences', 'configuration'], icon: <Sliders size={15} />, shortcut: 'Ctrl ,',
+      onSelect: () => setIsSettingsOpen(true),
+    },
+    {
+      id: 'toggle-sidebar', title: 'Toggle sidebar', description: 'Show or hide the conversation sidebar.', group: 'Navigation',
+      keywords: ['panel', 'history'], icon: <PanelLeft size={15} />, shortcut: 'Ctrl B',
+      onSelect: () => setIsSidebarOpen((value) => !value),
+    },
+    {
+      id: 'run-settings', title: 'Open run settings', description: 'Adjust parameters for the current conversation.', group: 'Navigation',
+      keywords: ['temperature', 'context', 'generation'], icon: <Settings2 size={15} />, shortcut: 'Ctrl I',
+      onSelect: () => setIsRunSettingsOpen(true),
+    },
+    {
+      id: 'workspace-panel', title: 'Manage workspace', description: 'Open linked folders and saved workspace presets.', group: 'Workspace',
+      keywords: ['project', 'folder', 'repository'], icon: <Folder size={15} />,
+      onSelect: () => setShowDirectoryDrawer(true),
+    },
+    {
+      id: 'workspace-add', title: 'Add project folder', description: 'Choose a folder to make its files available to the agent.', group: 'Workspace',
+      keywords: ['open folder', 'link project'], icon: <FolderPlus size={15} />,
+      onSelect: async () => { setShowDirectoryDrawer(true); await handleBrowseFolder(); },
+    },
+    {
+      id: 'workspace-save-preset', title: 'Save current workspace as preset', description: 'Store the linked folders for reuse in other sessions.', group: 'Workspace',
+      keywords: ['bookmark', 'preset'], icon: <BookmarkPlus size={15} />, disabled: directoryPaths.length === 0,
+      onSelect: () => { setShowDirectoryDrawer(true); setIsCreatingPreset(true); },
+    },
+    {
+      id: 'agent-explain', title: 'Agent: Explain this project', description: 'Inspect the workspace and summarize its architecture.', group: 'Agent commands',
+      keywords: ['architecture', 'understand', 'explain'], icon: <FileSearch size={15} />, disabled: isLoading,
+      onSelect: () => handleSendMessage('Inspect the linked workspace. Explain its architecture, main entry points, important modules, dependencies, and how the application runs. Do not modify files.', messages),
+    },
+    {
+      id: 'agent-review', title: 'Agent: Review code quality', description: 'Find concrete bugs, security risks, and maintainability issues.', group: 'Agent commands',
+      keywords: ['review', 'security', 'quality'], icon: <Bug size={15} />, disabled: isLoading,
+      onSelect: () => handleSendMessage('Perform a focused code review of the linked workspace. Prioritize concrete bugs, security risks, data-loss risks, performance problems, and maintainability issues. Report findings by severity with file paths and line references. Do not modify files.', messages),
+    },
+    {
+      id: 'agent-performance', title: 'Agent: Investigate performance', description: 'Identify bottlenecks and propose measurable improvements.', group: 'Agent commands',
+      keywords: ['optimize', 'slow', 'performance'], icon: <Gauge size={15} />, disabled: isLoading,
+      onSelect: () => handleSendMessage('Analyze the linked project for performance bottlenecks. Trace the most important issues to specific files and code paths, explain their impact, and propose prioritized improvements. Do not modify files.', messages),
+    },
+    {
+      id: 'agent-tests', title: 'Agent: Plan automated tests', description: 'Identify critical behavior and propose a test strategy.', group: 'Agent commands',
+      keywords: ['testing', 'unit tests', 'integration'], icon: <Zap size={15} />, disabled: isLoading,
+      onSelect: () => handleSendMessage('Inspect the linked project and propose a practical automated testing strategy. Identify existing test infrastructure, critical modules, missing coverage, and the first tests worth implementing. Do not modify files.', messages),
+    },
+    {
+      id: 'check-updates', title: 'Check for Esperto updates', description: 'Look for a newer application release.', group: 'Application',
+      keywords: ['version', 'update'], icon: <RefreshCw size={15} />,
+      onSelect: () => handleCheckUpdate(true),
+    },
+    ...chats.slice(0, 8).map((chat): PaletteCommand => ({
+      id: `chat-${chat.id}`, title: chat.title, description: 'Open recent conversation', group: 'Recent conversations',
+      keywords: ['history', 'session', 'chat'], icon: <MessageSquare size={15} />,
+      onSelect: () => setActiveChatId(chat.id),
+    })),
+    ...paletteModels.map((model): PaletteCommand => ({
+      id: `model-${model.id}`, title: `Use model: ${model.name}`,
+      description: `${model.isLocal ? 'Local model' : model.provider} · ${model.id}`,
+      group: 'Switch model', keywords: ['model', 'provider', model.provider, model.id],
+      icon: model.isLocal ? <Cpu size={15} /> : <Code2 size={15} />,
+      onSelect: () => handlePaletteModelSelect(model.id),
+    })),
+    ...presets.map((preset): PaletteCommand => ({
+      id: `preset-${preset.id}`, title: `Open workspace: ${preset.name}`,
+      description: `${preset.paths.length} linked folder(s)`, group: 'Workspace presets',
+      keywords: ['workspace', 'project', 'preset'], icon: <Folder size={15} />,
+      onSelect: () => { handleApplyPreset(preset); setShowDirectoryDrawer(true); },
+    })),
+  ];
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#090b10]">
       {/* Sidebar Colapsável */}
@@ -820,6 +960,17 @@ export default function App() {
                 {isChatModelOverridden ? 'chat' : 'global'}
               </span>
               <ChevronDown size={11} className="text-zinc-500" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsCommandPaletteOpen(true)}
+              title="Open Command Palette (Ctrl + Shift + P)"
+              className="flex h-8 items-center gap-1.5 rounded border border-[#1d2332] bg-[#10131b] px-2 text-[10px] text-zinc-400 transition hover:border-indigo-500/40 hover:text-zinc-200"
+            >
+              <CommandIcon size={13} />
+              <span className="hidden xl:inline">COMMANDS</span>
+              <kbd className="hidden 2xl:inline rounded border border-[#30394a] px-1 py-0.5 text-[9px]">Ctrl Shift P</kbd>
             </button>
 
             <div
@@ -1010,36 +1161,13 @@ export default function App() {
             className="flex-1 overflow-y-auto"
           >
             {messages.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center p-6 text-zinc-500 select-none max-w-xl mx-auto">
-                <div className="w-10 h-10 rounded-lg bg-[#11151f] border border-[#22293b] flex items-center justify-center mb-3 text-zinc-400">
-                  <Terminal size={20} strokeWidth={2} />
-                </div>
-
-                <h2 className="text-sm font-semibold text-zinc-200 mb-1 font-mono uppercase tracking-wider">
-                  Esperto Code Agent
-                </h2>
-                <p className="text-xs text-zinc-500 mb-6 text-center font-sans">
-                  Agente autônomo com acesso a arquivos locais, execução de shell e inspeção de código.
-                </p>
-
-                <div className="grid grid-cols-1 gap-1.5 w-full font-mono text-xs">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      handleSendMessage(
-                        'Analise a estrutura do workspace vinculado e liste os principais arquivos e dependências.'
-                      )
-                    }
-                    className="px-3 py-2 bg-[#0e1118] hover:bg-[#141924] border border-[#1b2232] hover:border-[#2e3952] rounded-md text-left transition cursor-pointer flex items-center justify-between text-zinc-300"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="text-zinc-500">$</span>
-                      <span>esperto --audit-codebase</span>
-                    </div>
-                    <span className="text-[10px] text-zinc-600">inspeção de arquivos</span>
-                  </button>
-                </div>
-              </div>
+              <WelcomePanel
+                modelName={modelInfo.name}
+                isLocalModel={Boolean(modelInfo.isLocal)}
+                hasWorkspace={directoryPaths.length > 0}
+                onPrompt={(prompt) => handleSendMessage(prompt, messages)}
+                onOpenSettings={() => setIsSettingsOpen(true)}
+              />
             ) : (
               messages.map((msg, index) => (
                 <ChatMessage
@@ -1213,6 +1341,13 @@ export default function App() {
       />
 
       <ErrorModal isOpen={activeError !== null} onClose={() => setActiveError(null)} errorInfo={activeError} />
+
+      <CommandPalette
+        isOpen={isCommandPaletteOpen}
+        commands={paletteCommands}
+        onClose={() => setIsCommandPaletteOpen(false)}
+        onSearchConversations={handlePaletteSearchConversations}
+      />
     </div>
   );
 }

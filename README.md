@@ -1,229 +1,211 @@
-<div align="center">
-
 # Esperto
 
-**Cliente desktop de IA para desenvolvimento de software, modelos locais e pesquisa na web.**
+Esperto is a Windows desktop AI assistant for software development. It combines cloud AI providers with local inference through Ollama, project-folder context, persistent conversations, image attachments, and optional web search.
 
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Tauri](https://img.shields.io/badge/Tauri-v2-orange?logo=tauri)](https://v2.tauri.app/)
-[![React](https://img.shields.io/badge/React-18-61dafb?logo=react)](https://react.dev/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue?logo=typescript)](https://www.typescriptlang.org/)
-[![Ollama](https://img.shields.io/badge/Ollama-local%20inference-black)](https://ollama.com/)
+This guide covers the requirements, installation, first launch, model setup, and the main features needed to run the application.
 
-</div>
+## Features
 
----
+- Chat with supported cloud providers or locally installed Ollama models.
+- Search, download, and import compatible single-file GGUF models from public Hugging Face repositories.
+- Install and start Ollama from the application on supported Windows systems.
+- Inspect local AI availability, NVIDIA GPU information, and VRAM diagnostics.
+- Attach images and files to conversations when the selected model supports the relevant input type.
+- Link project folders so the assistant can inspect source files and use the application's project tools.
+- Keep conversations and settings locally in IndexedDB.
+- Enable web search per conversation. Esperto uses a configured SearXNG endpoint when available and can fall back to DuckDuckGo without requiring Docker.
+- Configure model parameters and system instructions globally or for an individual conversation.
+- Use the Command Palette to search commands, switch models, open sessions, manage workspaces, and run predefined agent tasks.
+- Check for application updates from the interface.
 
-## 1. Visao geral
+## Requirements
 
-Esperto e um cliente desktop nativo baseado em Tauri 2, Rust, React e TypeScript. O projeto combina provedores de IA em nuvem com inferencia local por Ollama, contexto de projetos locais, conversas persistentes e ferramentas de desenvolvimento.
+To build the application from source on Windows, install:
 
-Esta versao amplia o provedor Ollama com entrada multimodal, recuperacao de pesquisa web via SearXNG e extracao controlada de texto de paginas publicas. A inferencia do modelo permanece local; somente as consultas de pesquisa e as paginas explicitamente recuperadas trafegam pela internet.
-
-## 2. Arquitetura
-
-```text
-Esperto Desktop
-|
-+-- React 18 / TypeScript
-|   +-- Conversas e historico (Dexie / IndexedDB)
-|   +-- Anexos e imagens
-|   +-- Selecao de modelos
-|   +-- Configuracoes por conversa
-|   +-- Contexto de workspace
-|
-+-- Tauri 2 / Rust
-|   +-- Comandos nativos e acesso a arquivos
-|   +-- Cliente Ollama (HTTP streaming)
-|   +-- Pesquisa web (SearXNG JSON API)
-|   +-- Extracao de texto de paginas HTTP(S)
-|
-+-- Servicos locais
-    +-- Ollama: http://127.0.0.1:11434
-    +-- SearXNG: http://127.0.0.1:8080
-```
-
-### Pesquisa web
-
-Ao ativar **Pesquisa Web em Tempo Real** nas configuracoes da conversa, o provedor Ollama:
-
-1. Envia a consulta para a API JSON do SearXNG.
-2. Seleciona ate dois resultados publicos.
-3. Tenta extrair o texto das paginas, com limite de tamanho e tempo.
-4. Injeta os resultados no prompt como conteudo externo nao confiavel.
-5. Instrui o modelo a citar as fontes usando links Markdown.
-
-Se o SearXNG estiver indisponivel, o Esperto tenta automaticamente uma busca HTML publica no DuckDuckGo. Essa alternativa nao exige Docker, mas depende da disponibilidade do site e pode ser limitada por bloqueios ou mudancas no HTML. Se ambos falharem, a conversa continua sem fontes e o modelo e informado da falha.
-
-O mecanismo e independente do Google. O SearXNG agrega motores configurados, incluindo Google quando disponivel, e pode recorrer a outros motores. A disponibilidade depende de bloqueios, CAPTCHA, limites e politicas dos provedores de busca.
-
-## 3. Hardware recomendado
-
-Configuracao de referencia para desenvolvimento local:
-
-| Componente | Equipamento | Perfil recomendado |
-|---|---|---|
-| GPU | NVIDIA RTX 2060 Super 8 GB | Qwen3-VL 4B Q4 |
-| CPU | AMD Ryzen 5 5600 | Inferencia assistida por GPU |
-| RAM | 16 GB | Um modelo carregado por vez |
-| Contexto inicial | 4.096 tokens | Aumentar para 8.192 apos validar VRAM |
-
-O uso de VRAM varia com driver, versao do Ollama, tamanho de imagem, cache KV, contexto e outros processos graficos. Nao existe garantia de que todo o modelo permanecera na GPU em qualquer configuracao. Verifique a distribuicao com `ollama ps` e o uso de memoria com `nvidia-smi`.
-
-### Modelos recomendados
-
-| Finalidade | Modelo Ollama | Entrada visual | Observacao |
-|---|---|---|---|
-| Assistente multimodal principal | `qwen3-vl:4b` | Sim | Melhor ponto de partida para 8 GB |
-| Programacao textual | `qwen2.5-coder:7b` | Nao | Alternativa especializada em codigo |
-
-Os modelos sao carregados sob demanda. Em uma GPU de 8 GB, mantenha apenas um modelo carregado por vez. Qwen3-VL 4B no catalogo Ollama usa quantizacao Q4_K_M para o modelo e projetor visual separado; o tamanho em disco nao representa o consumo total de VRAM.
-
-Fontes dos modelos:
-- [Ollama: Qwen3-VL](https://ollama.com/library/qwen3-vl)
-- [Ollama: Qwen2.5-Coder](https://ollama.com/library/qwen2.5-coder)
-- [Hugging Face: Qwen3-VL-4B-Instruct-GGUF](https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF)
-- [Hugging Face: Qwen2.5-Coder-7B-Instruct-GGUF](https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF)
-
-## 4. Requisitos de desenvolvimento
-
-- Windows 10 22H2 ou Windows 11.
-- Node.js 20 ou superior.
-- npm.
-- Rust stable e Cargo.
-- Microsoft C++ Build Tools / Visual Studio Build Tools com MSVC.
+- Windows 10 (22H2 or later) or Windows 11.
+- Node.js 20 or later and npm.
+- Rust stable and Cargo.
+- Microsoft C++ Build Tools with the MSVC toolchain.
 - WebView2 Runtime.
-- Driver NVIDIA atualizado.
-- Ollama para inferencia local (0.12.7 ou superior para Qwen3-VL).
-- Docker Desktop com Docker Compose apenas se voce quiser hospedar uma instancia SearXNG local (opcional).
 
-Referencias:
+For local AI, install a current NVIDIA driver when using an NVIDIA GPU. Ollama is installed from the application or from the [official Windows installer](https://ollama.com/download/windows). The Qwen3-VL model requires Ollama 0.12.7 or later.
+
+Docker Desktop is optional. It is only needed if you want to run your own local SearXNG instance instead of using the built-in DuckDuckGo fallback.
+
+Official prerequisites:
+
 - [Node.js](https://nodejs.org/)
 - [Rust](https://www.rust-lang.org/tools/install)
 - [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)
-- [Ollama para Windows](https://ollama.com/download/windows)
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+- [Ollama for Windows](https://ollama.com/download/windows)
 
-## 5. Instalacao
+## Install and run from source
 
-### 5.1 Dependencias do projeto
+1. Clone the repository and open its directory:
 
-No diretorio raiz:
+   ```powershell
+   git clone https://github.com/samuelspineli34/Esperto.git
+   cd Esperto
+   ```
 
-```powershell
-npm install
-```
+2. Install JavaScript dependencies:
 
-### 5.2 Instalar e baixar os modelos locais
+   ```powershell
+   npm install
+   ```
 
-Abra PowerShell no diretorio raiz e execute:
+3. Start the desktop application in development mode:
 
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\scripts\setup-local-ai.ps1
-```
+   ```powershell
+   npm run tauri:dev
+   ```
 
-O script verifica o Ollama e baixa:
-- `qwen3-vl:4b`
-- `qwen2.5-coder:7b`
+4. Create a distributable Windows installer and signed updater artifacts:
 
-Para baixar somente o modelo visual:
+   ```powershell
+   npm run tauri:build:signed
+   ```
 
-```powershell
-.\scripts\setup-local-ai.ps1 -SkipCoderModel
-```
+The generated installer is placed in the Tauri build output directory under `src-tauri/target/release/bundle/`. Use the signed build command when the updater public key is configured.
 
-Para baixar somente o modelo de codigo:
+### Build signed updater releases
 
-```powershell
-.\scripts\setup-local-ai.ps1 -SkipVisionModel
-```
+The updater is configured with a public key and requires the matching private key to sign release artifacts. Keep both key files in the local `.tauri` directory:
 
-O instalador oficial do Ollama e utilizado quando o comando `ollama` nao esta disponivel e o WinGet esta instalado. Caso contrario, instale manualmente pelo link oficial.
+- `.tauri/esperto.key` — private signing key. Never commit or distribute this file.
+- `.tauri/esperto.key.pub` — public key. Its contents must match `plugins.updater.pubkey` in `src-tauri/tauri.conf.json`.
 
-### 5.3 Instalar a pesquisa web local
-
-Opcional: para hospedar sua propria instancia SearXNG, instale e inicie o Docker Desktop. Depois execute:
+Build and sign the release artifacts with:
 
 ```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\scripts\setup-searxng.ps1
+npm run tauri:build:signed
 ```
 
-O script cria `infra/searxng/.env` com um segredo aleatorio e inicia o SearXNG em `127.0.0.1:8080`. O servico fica vinculado ao loopback e nao e publicado na rede local.
+The script verifies that both key files exist and that the public key matches the application configuration. It sets `TAURI_SIGNING_PRIVATE_KEY` to the private-key file path, optionally prompts for the key password without echoing it, and runs the Tauri release build. Press Enter at the password prompt if the private key was generated without a password. Tauri creates the updater signatures alongside the Windows installer artifacts.
 
-Teste manual:
+Do not remove the updater public key to bypass a missing private key. Tauri requires signed updater artifacts when updater verification is configured. If you only need a one-off unsigned installer, use a separate configuration with the updater disabled; do not ship that configuration as an update to users whose installed application trusts the current public key.
+
+## First launch and local AI setup
+
+1. Open Esperto and go to **Settings > Ollama & GPU**.
+2. Review the local AI diagnostics. The application checks whether Ollama is installed and reachable and reports available NVIDIA GPU information when the required driver tools are present.
+3. If Ollama is missing, select **Install Ollama**. This uses Windows Package Manager (`winget`). If `winget` is unavailable, install Ollama using the official installer linked above.
+4. Start Ollama from the same settings page if it is installed but not running.
+5. Keep the default local endpoint unless your Ollama server uses a different address:
+
+   ```text
+   http://127.0.0.1:11434
+   ```
+
+6. Select **Refresh** to load the models installed in Ollama.
+
+The application can manage Ollama and its models, but model downloads require an internet connection and sufficient disk space. Model inference is performed locally after the model has been downloaded.
+
+## Install models
+
+There are two supported ways to add models.
+
+### From the Ollama library
+
+1. Open **Settings > Ollama & GPU**.
+2. Use the model download field and enter an Ollama model identifier, for example:
+
+   ```text
+   qwen3-vl:4b
+   ```
+
+3. Start the download and wait for it to complete.
+4. Refresh the installed model list and select the model in the model selector.
+
+Recommended starting models for systems with 8 GB of GPU memory:
+
+| Use | Model | Image input |
+|---|---|---|
+| General and multimodal assistance | `qwen3-vl:4b` | Supported |
+| Software development and code tasks | `qwen2.5-coder:7b` | Not supported |
+
+Model references:
+
+- [Qwen3-VL on Ollama](https://ollama.com/library/qwen3-vl)
+- [Qwen2.5-Coder on Ollama](https://ollama.com/library/qwen2.5-coder)
+
+### From Hugging Face
+
+1. Open **Settings > Ollama & GPU** and locate **Search and install GGUF from Hugging Face**.
+2. Search for a model or enter a repository name such as `Qwen/Qwen2.5-Coder-7B-Instruct-GGUF`.
+3. Select the repository, then choose a GGUF file from its file list.
+4. Enter a local Ollama model name when prompted, if required by the interface.
+5. Select **Download and import into Ollama** and wait for the download and import to finish.
+6. Refresh the model list and select the imported model.
+
+The current Hugging Face importer supports public repositories containing a single GGUF file. Private or gated repositories, multi-part GGUF shards, and multimodal models that require separate projector files may need additional setup. For Qwen3-VL, use the Ollama library installation flow unless the Hugging Face repository explicitly provides all required files in a compatible format.
+
+Hugging Face references:
+
+- [Qwen3-VL GGUF](https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF)
+- [Qwen2.5-Coder GGUF](https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF)
+
+## Configure web search
+
+Web search is optional and is controlled per conversation.
+
+1. Open **Settings > Ollama & GPU**.
+2. If you have a SearXNG instance, enter its base address. The default local address is:
+
+   ```text
+   http://127.0.0.1:8080
+   ```
+
+3. If SearXNG is not configured or cannot be reached, Esperto attempts to use DuckDuckGo as a fallback. This fallback does not require Docker Desktop.
+4. Open the conversation's run settings and enable **Real-time Web Search** when current external information is needed.
+
+To host SearXNG locally, Docker Desktop and Docker Compose are required. From the project directory, run:
 
 ```powershell
-Invoke-RestMethod "http://127.0.0.1:8080/search?q=ollama&format=json"
+npm run setup:search
 ```
 
-A configuracao `infra/searxng/settings.yml` habilita os formatos HTML e JSON. A API JSON e necessaria para a integracao do Esperto.
+This optional setup creates the local SearXNG configuration and starts the service. It is not required for the DuckDuckGo fallback.
 
-Comandos de manutencao:
+Search requests and retrieved web pages are sent to external websites. Local model inference and the local conversation database remain on the computer unless a cloud provider is selected.
 
-```powershell
-cd infra/searxng
-docker compose --env-file .env -f docker-compose.yml ps
-docker compose --env-file .env -f docker-compose.yml logs -f
-docker compose --env-file .env -f docker-compose.yml down
-```
+## Work with a project
 
-### 5.4 Executar o Esperto
+1. Create or open a conversation.
+2. Use the workspace controls to add one or more project folders.
+3. Allow Esperto to synchronize the selected folders.
+4. Ask the assistant to inspect, explain, review, or modify files in the linked workspace.
+5. Review proposed changes and confirmation prompts before allowing file or command actions.
 
-Na raiz do projeto:
+The welcome screen provides starter prompts for project inspection, bug investigation, feature implementation, and code review. These prompts are starting points and can be edited in the conversation input.
 
-```powershell
-npm run tauri:dev
-```
+## Conversation controls
 
-Para gerar instaladores:
+- Select a model from the model control in the top bar. A model selected for one conversation can override the global default.
+- Use **Run Settings** to configure generation parameters and the system instruction for the current conversation.
+- Use the memory control to enable or disable global memory for a conversation.
+- Attach supported files or images using the attachment control.
+- Use the stop control or `Esc` to cancel an active response.
+- Conversation history and application settings are stored locally in IndexedDB.
 
-```powershell
-npm run tauri:build
-```
+Keyboard shortcuts:
 
-## 6. Configuracao dentro do Esperto
+| Shortcut | Action |
+|---|---|
+| `Ctrl + N` | New conversation |
+| `Ctrl + B` | Toggle the sidebar |
+| `Ctrl + I` | Open run settings |
+| `Ctrl + Shift + P` | Open Command Palette |
+| `Ctrl + ,` | Open application settings |
+| `Esc` | Stop generation or close the active dialog |
+| `Enter` | Send message |
+| `Shift + Enter` | Insert a new line |
 
-1. Abra **Configuracoes > Ollama & GPU**.
-2. Confirme o endereco `http://127.0.0.1:11434`.
-3. Defina a janela de contexto inicial em **4k**.
-4. Atualize a lista de modelos instalados.
-5. Em **Configuracoes > Modelos & Servidores**, selecione `Ollama: qwen3-vl:4b` para conversas multimodais.
-6. Para tarefas de codigo sem imagens, selecione `Ollama: qwen2.5-coder:7b`.
-7. Em **Configuracoes > Ollama & GPU**, defina SearXNG como `http://127.0.0.1:8080`.
-8. Abra as configuracoes da conversa e habilite **Pesquisa Web em Tempo Real** quando precisar de fontes atuais.
+## Hardware guidance
 
-O controle de pesquisa web e por conversa. Ele nao envia automaticamente todas as mensagens para mecanismos externos.
+For a computer with an NVIDIA GPU with 8 GB of VRAM and 16 GB of system memory, begin with a 4,096-token context and run one local model at a time. Actual GPU memory usage depends on the model, quantization, context length, image size, Ollama version, and other running applications. Increase the context only after checking available memory and model placement.
 
-## 7. Imagens e multimodalidade
-
-O provedor Ollama envia anexos de imagem como Base64 no campo `images` da API `/api/chat`. O nome do modelo e verificado para evitar o envio de imagens a modelos textuais sem capacidade visual.
-
-Modelos visuais reconhecidos incluem nomes com `vl`, `vision`, `llava`, `moondream` e `minicpm`. A lista de capacidades exibida pelo Esperto e inferida a partir do identificador do modelo; confirme a ficha do modelo antes de utiliza-lo.
-
-## 8. Pesquisa, privacidade e seguranca
-
-- A inferencia local e realizada pelo Ollama. As mensagens enviadas ao provedor local nao sao submetidas a moderacao de uma API de nuvem, mas o alinhamento e as recusas aprendidas durante o treinamento ainda dependem do modelo; nao existe garantia de comportamento totalmente sem censura.
-- A pesquisa web envia a consulta ao SearXNG e aos motores externos configurados nele.
-- A recuperacao de paginas envia requisicoes HTTP(S) para os sites selecionados.
-- O texto das paginas e tratado como dado nao confiavel, nunca como instrucao de sistema.
-- O extrator limita a resposta a 1,5 MB antes de converter HTML em texto e limita o conteudo injetado no prompt.
-- URLs com esquemas diferentes de HTTP/HTTPS, hosts locais e enderecos IP privados/loopback sao recusados pelo extrator.
-- SearXNG fica exposto somente em `127.0.0.1`.
-- Chaves de API e arquivos `.env` nao devem ser versionados.
-
-A validacao de host impede destinos locais explicitos, mas nao substitui um firewall ou uma politica de rede contra DNS malicioso. Nao exponha a instancia SearXNG publicamente sem revisar a documentacao oficial e a configuracao de seguranca.
-
-## 9. Diagnostico
-
-Execute:
-
-```powershell
-.\scripts\test-local-ai.ps1
-```
-
-Verifique o Ollama:
+Useful diagnostic commands, when available:
 
 ```powershell
 ollama list
@@ -231,76 +213,42 @@ ollama ps
 nvidia-smi
 ```
 
-Se o modelo nao utilizar toda a GPU, reduza o contexto para 4k, feche aplicacoes que consomem VRAM e confira a coluna `PROCESSOR` em `ollama ps`.
+## Troubleshooting
 
-Se a pesquisa retornar erro:
-- Confirme se Docker Desktop esta em execucao.
-- Verifique `docker compose logs` em `infra/searxng`.
-- Teste `http://127.0.0.1:8080/search?q=test&format=json`.
-- Confirme se o campo `search.formats` contem `json`.
-- Considere que motores externos podem estar temporariamente indisponiveis ou bloqueando requisicoes.
+**Ollama is not detected**
 
-## 10. Dependencias Python opcionais
+- Confirm that Ollama is installed.
+- Check that the configured endpoint is `http://127.0.0.1:11434`.
+- Use the application controls to start Ollama and refresh its status.
+- If installed in a custom location, configure the executable path in settings.
 
-A aplicacao desktop nao utiliza Python para inferencia, pesquisa ou leitura de paginas. `requirements.txt` contem somente dependencias do prototipo FastAPI legado em `main.py`; PyTorch foi removido por nao participar do fluxo atual e por adicionar uma instalacao pesada desnecessaria.
+**A model download or import fails**
 
-Para instalar o ambiente Python opcional:
+- Confirm that Ollama is running and that the computer has internet access.
+- Check available disk space; model files can occupy several gigabytes.
+- For Hugging Face, use a public repository with a single compatible GGUF file.
+- If the model requires multiple shards or separate projector files, use a compatible Ollama library package or a model-specific import procedure.
 
-```powershell
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-```
+**A model runs out of GPU memory**
 
-## 11. Estrutura relevante
+- Reduce the context length to 4,096 tokens.
+- Close other GPU-intensive applications.
+- Avoid keeping multiple models loaded simultaneously.
+- Check model placement with `ollama ps` and GPU usage with `nvidia-smi`.
 
-```text
-src/
-  components/
-  lib/
-  services/
-    ai.ts
-    ollama.ts
-    ...
-src-tauri/
-  src/
-    lib.rs
-  Cargo.toml
-infra/
-  searxng/
-    docker-compose.yml
-    settings.yml
-scripts/
-  setup-local-ai.ps1
-  setup-searxng.ps1
-  test-local-ai.ps1
-```
+**Web search does not return results**
 
-## 12. Build e verificacao
+- Confirm that the conversation's web search option is enabled.
+- Check the internet connection.
+- If using SearXNG, confirm that its endpoint is reachable and its JSON search format is enabled.
+- External search providers may rate-limit or block automated requests. The DuckDuckGo fallback is also subject to availability and website changes.
 
-```powershell
-npm run build
-cd src-tauri
-cargo check
-cd ..
-npm run tauri:build
-```
+## Privacy and security
 
-A compilacao do frontend e do backend deve ser validada no ambiente Windows de destino, especialmente para conferir toolchain MSVC, WebView2, drivers NVIDIA e o instalador final.
+Local inference is handled by Ollama. Selecting a cloud provider sends conversation content to that provider according to its terms and privacy policy. Enabling web search sends search queries to external search services and may retrieve content from third-party websites.
 
-## 13. Licenca
+Treat retrieved web content and files as untrusted input. Review file changes and command execution requests before confirming them. Do not commit API keys, access tokens, local environment files, or private model credentials to the repository.
 
-Projeto distribuido sob a licenca MIT. Consulte [LICENSE](LICENSE).
+## License
 
-## Configuracao pela interface (Windows)
-
-Na primeira abertura, o Esperto exibe a aba **Ollama & GPU**. Nela voce pode:
-
-1. Instalar o Ollama pelo `winget` (sem abrir PowerShell manualmente).
-2. Iniciar o servidor local e verificar se a GPU NVIDIA/VRAM esta visivel via `nvidia-smi`.
-3. Baixar os modelos recomendados diretamente da biblioteca Ollama.
-4. Pesquisar repositorios publicos GGUF no Hugging Face, selecionar um arquivo, acompanhar o download e importar o GGUF de arquivo unico no Ollama.
-5. Usar pesquisa web sem Docker: SearXNG e opcional; quando indisponivel, o Esperto tenta DuckDuckGo como fallback.
-
-O download de modelos exige consentimento do usuario e espaco em disco. O importador Hugging Face atual aceita somente GGUF publico de arquivo unico; repositorios privados/gated, modelos safetensors e modelos multimodais que dependem de projetor separado nao sao importados por esse fluxo. Para modelos de visao como Qwen3-VL, use o perfil recomendado do Ollama.
-
+Esperto is distributed under the MIT License. See [LICENSE](LICENSE) for details.
