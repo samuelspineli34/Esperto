@@ -103,7 +103,7 @@ fn check_ollama_status(custom_host: Option<String>) -> Result<bool, String> {
     Ok(TcpStream::connect_timeout(&socket_addr, Duration::from_millis(500)).is_ok())
 }
 
-#   [tauri::command]
+#[tauri::command]
 async fn fetch_media_from_hf(prompt: String, token: String, is_video: bool) -> Result<String, String> {
     let client = reqwest::Client::new();
     // FLUX.1 para imagem, SVD para vídeo
@@ -420,6 +420,155 @@ fn open_url(url: String) {
     }
 }
 
+
+#[derive(Serialize)]
+struct WebSearchResult {
+    title: String,
+    url: String,
+    snippet: String,
+    engine: Option<String>,
+    published_date: Option<String>,
+}
+
+fn allowed_external_url(url: &reqwest::Url) -> bool {
+    if !matches!(url.scheme(), "http" | "https") {
+        return false;
+    }
+    let Some(host) = url.host_str() else { return false; };
+    let host_lower = host.to_ascii_lowercase();
+    if host_lower == "localhost" || host_lower.ends_with(".localhost") || host_lower.ends_with(".local") {
+        return false;
+    }
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        return match ip {
+            std::net::IpAddr::V4(v4) => !(v4.is_private() || v4.is_loopback() || v4.is_link_local() || v4.is_unspecified() || v4.is_broadcast()),
+            std::net::IpAddr::V6(v6) => !(v6.is_loopback() || v6.is_unspecified() || v6.is_unique_local() || v6.is_unicast_link_local()),
+        };
+    }
+    true
+}
+
+fn external_http_client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .connect_timeout(Duration::from_secs(6))
+        .user_agent("EspertoDesktop/0.2 (+https://github.com/samuelspineli34/Esperto)")
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if attempt.previous().len() >= 4 || !allowed_external_url(attempt.url()) {
+                attempt.stop()
+            } else {
+                attempt.follow()
+            }
+        }))
+        .build()
+        .map_err(|e| format!("Não foi possível inicializar o cliente HTTP: {e}"))
+}
+
+#[tauri::command]
+async fn search_web(query: String, searxng_host: Option<String>) -> Result<String, String> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Err("Informe uma consulta para pesquisar.".to_string());
+    }
+    if query.len() > 500 {
+        return Err("A consulta de pesquisa excede 500 caracteres.".to_string());
+    }
+
+    let base = searxng_host.unwrap_or_else(|| "http://127.0.0.1:8080".to_string());
+    let parsed = reqwest::Url::parse(base.trim()).map_err(|e| format!("Endereço do SearXNG inválido: {e}"))?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return Err("O endereço do SearXNG deve utilizar HTTP ou HTTPS.".to_string());
+    }
+    let endpoint = parsed.join("search").map_err(|e| e.to_string())?;
+    let client = external_http_client()?;
+    let response = client.get(endpoint)
+        .query(&[
+            ("q", query),
+            ("format", "json"),
+            ("language", "pt-BR"),
+            ("safesearch", "0"),
+        ])
+        .send().await.map_err(|e| format!("Falha ao consultar SearXNG: {e}"))?;
+
+    if !response.status().is_success() {
+        return Err(format!("SearXNG retornou HTTP {}. Verifique se o formato JSON está habilitado.", response.status()));
+    }
+    let payload: serde_json::Value = response.json().await
+        .map_err(|e| format!("Resposta JSON inválida do SearXNG: {e}"))?;
+    let mut results = Vec::new();
+    if let Some(items) = payload.get("results").and_then(|v| v.as_array()) {
+        for item in items.iter().take(8) {
+            let url = item.get("url").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+            let title = item.get("title").and_then(|v| v.as_str()).unwrap_or("Sem título").to_string();
+            let snippet = item.get("content").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+            if url.is_empty() { continue; }
+            let parsed_url = match reqwest::Url::parse(&url) { Ok(u) => u, Err(_) => continue };
+            if !allowed_external_url(&parsed_url) { continue; }
+            results.push(WebSearchResult {
+                title,
+                url,
+                snippet,
+                engine: item.get("engine").and_then(|v| v.as_str()).map(str::to_string),
+                published_date: item.get("publishedDate").and_then(|v| v.as_str()).map(str::to_string),
+            });
+        }
+    }
+    serde_json::to_string(&results).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn fetch_webpage_text(url: String) -> Result<String, String> {
+    let parsed = reqwest::Url::parse(url.trim()).map_err(|e| format!("URL inválida: {e}"))?;
+    if !allowed_external_url(&parsed) {
+        return Err("A URL não é permitida. Apenas páginas HTTP/HTTPS públicas podem ser consultadas.".to_string());
+    }
+
+    let client = external_http_client()?;
+    let response = client.get(parsed.clone()).send().await
+        .map_err(|e| format!("Falha ao abrir {}: {e}", parsed.host_str().unwrap_or("site")))?;
+    if !response.status().is_success() {
+        return Err(format!("A página retornou HTTP {}.", response.status()));
+    }
+    let content_type = response.headers().get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok()).unwrap_or("");
+    if !content_type.contains("text/html") && !content_type.contains("text/plain") && !content_type.contains("application/xhtml") {
+        return Err("O endereço não retornou HTML ou texto legível.".to_string());
+    }
+
+    let mut response = response;
+    let mut bytes = Vec::with_capacity(256 * 1024);
+    while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
+        let remaining = 1_500_000usize.saturating_sub(bytes.len());
+        if remaining == 0 { break; }
+        bytes.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+        if bytes.len() >= 1_500_000 { break; }
+    }
+    let body = String::from_utf8_lossy(&bytes).to_string();
+    let without_scripts = regex::Regex::new(r"(?is)<(script|style|noscript|svg|iframe)[^>]*>.*?</(script|style|noscript|svg|iframe)>")
+        .map_err(|e| e.to_string())?.replace_all(&body, " ");
+    let with_breaks = regex::Regex::new(r"(?i)</(p|div|article|section|h[1-6]|li|tr|br)>")
+        .map_err(|e| e.to_string())?.replace_all(&without_scripts, "\n");
+    let without_tags = regex::Regex::new(r"(?s)<[^>]+>")
+        .map_err(|e| e.to_string())?.replace_all(&with_breaks, " ");
+    let decoded = without_tags
+        .replace("&nbsp;", " ")
+        .replace("&#160;", " ")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'");
+    let normalized = regex::Regex::new(r"[ \t\r]+")
+        .map_err(|e| e.to_string())?.replace_all(&decoded, " ");
+    let compact = regex::Regex::new(r"\n\s*\n+")
+        .map_err(|e| e.to_string())?.replace_all(&normalized, "\n");
+    let text = compact.trim();
+    if text.is_empty() {
+        return Err("Não foi possível extrair texto útil da página.".to_string());
+    }
+    Ok(text.chars().take(14000).collect())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -427,6 +576,8 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             open_url,
+            search_web,
+            fetch_webpage_text,
             read_multiple_directories,
             check_ollama_status,
             start_ollama_service,

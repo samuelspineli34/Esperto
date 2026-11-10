@@ -44,3 +44,6 @@ Thumbs.dba
 
 *.key
 *.key.pub
+# Local search service secrets and generated state
+infra/searxng/.env
+infra/searxng/core-config/

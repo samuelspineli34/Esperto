@@ -473,21 +473,21 @@ export const SettingsModal: React.FC<Props> = ({
                     </span>
                   </div>
                   <span className="text-xs font-mono text-emerald-300 font-bold">
-                    {form.ollamaContextLength || 8192} tokens
+                    {form.ollamaContextLength || 4096} tokens
                   </span>
                 </div>
                 <p className="text-[11px] text-zinc-400">
-                  Controla quantos tokens o Ollama processa. Para sua RTX de 12GB com modelos 14B, 8k é o ideal para manter a alta velocidade na GPU.
+                  Controla a memória de contexto. Para a RTX 2060 Super de 8 GB, comece em 4k; 8k pode exigir offload parcial para a RAM dependendo do modelo.
                 </p>
 
                 <div className="flex gap-2 pt-1 font-mono text-xs">
-                  {[4096, 8192, 16384, 32768].map((tokens) => (
+                  {[4096, 8192, 16384].map((tokens) => (
                     <button
                       key={tokens}
                       type="button"
                       onClick={() => setForm((prev) => ({ ...prev, ollamaContextLength: tokens }))}
                       className={`flex-1 py-1 rounded transition border cursor-pointer text-center ${
-                        (form.ollamaContextLength || 8192) === tokens
+                        (form.ollamaContextLength || 4096) === tokens
                           ? 'bg-emerald-900/60 text-emerald-200 border-emerald-500/60 font-bold'
                           : 'bg-[#10161f] text-zinc-400 border-[#1f2838] hover:text-white'
                       }`}
@@ -545,12 +545,53 @@ export const SettingsModal: React.FC<Props> = ({
               </div>
 
               <div className="p-3.5 bg-[#0a0d13] border border-[#1c2232] rounded-xl space-y-2.5">
+                <div className="flex items-center gap-2">
+                  <Globe size={14} className="text-sky-400" />
+                  <span className="text-xs font-bold text-zinc-200 font-mono">Pesquisa na Web para modelos locais</span>
+                </div>
+                <p className="text-[11px] text-zinc-400">
+                  Configure a instância SearXNG. A pesquisa é acionada pelo controle de pesquisa nas configurações da conversa; o modelo e o histórico permanecem locais.
+                </p>
+                <label className="block text-[11px] text-zinc-400 font-mono">URL do SearXNG</label>
+                <input
+                  type="url"
+                  value={form.searxngHost || 'http://127.0.0.1:8080'}
+                  onChange={(e) => setForm((prev) => ({ ...prev, searxngHost: e.target.value }))}
+                  placeholder="http://127.0.0.1:8080"
+                  className="w-full bg-[#121622] border border-[#21293a] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none"
+                />
+                <p className="text-[10px] text-zinc-500">
+                  O serviço precisa aceitar respostas JSON em /search?format=json. Consulte infra/searxng e o README para instalação.
+                </p>
+              </div>
+
+              <div className="p-3.5 bg-[#0a0d13] border border-[#1c2232] rounded-xl space-y-2.5">
+                <span className="text-xs font-bold text-zinc-200 flex items-center gap-1.5 font-mono">
+                  <Download size={13} className="text-emerald-400" />
+                  <span>Perfis recomendados para RTX 2060 Super 8 GB</span>
+                </span>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  <div className="p-2.5 bg-[#101722] border border-[#1f3440] rounded-lg space-y-2">
+                    <div className="text-xs text-zinc-100 font-semibold">Qwen3-VL 4B</div>
+                    <p className="text-[10px] text-zinc-400">Modelo principal multimodal: texto, imagens e análise de screenshots.</p>
+                    <button type="button" onClick={() => handlePullModel('qwen3-vl:4b')} disabled={isPulling} className="w-full bg-emerald-700 hover:bg-emerald-600 text-white text-[11px] py-1.5 rounded disabled:opacity-40">Baixar qwen3-vl:4b</button>
+                  </div>
+                  <div className="p-2.5 bg-[#101722] border border-[#28314a] rounded-lg space-y-2">
+                    <div className="text-xs text-zinc-100 font-semibold">Qwen2.5-Coder 7B</div>
+                    <p className="text-[10px] text-zinc-400">Especialista textual em programação; não recebe imagens.</p>
+                    <button type="button" onClick={() => handlePullModel('qwen2.5-coder:7b')} disabled={isPulling} className="w-full bg-indigo-700 hover:bg-indigo-600 text-white text-[11px] py-1.5 rounded disabled:opacity-40">Baixar qwen2.5-coder:7b</button>
+                  </div>
+                </div>
+                <p className="text-[10px] text-zinc-500">Use apenas um modelo por vez. Os pesos Q4 do Qwen3-VL 4B ocupam cerca de 3,3 GB, além do projetor visual, cache e contexto.</p>
+              </div>
+
+              <div className="p-3.5 bg-[#0a0d13] border border-[#1c2232] rounded-xl space-y-2.5">
                 <span className="text-xs font-bold text-zinc-200 flex items-center gap-1.5 font-mono">
                   <Download size={13} className="text-indigo-400" />
                   <span>Baixar Modelo do Hugging Face ou Ollama</span>
                 </span>
                 <p className="text-[11px] text-zinc-400">
-                  Cole direto o identificador (ex: <code>mradermacher/DeepSeek-R1-Distill-Qwen-14B-abliterated-v2-GGUF</code>):
+                  Cole o identificador de um modelo do Ollama (ex.: <code>qwen3-vl:4b</code>) ou o repositório GGUF compatível do Hugging Face:
                 </p>
 
                 <div className="flex gap-2">

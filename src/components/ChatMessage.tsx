@@ -514,6 +514,32 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
       <ReactMarkdown
         key={keyPrefix}
         components={{
+          a(props) {
+            const { href, children, ...rest } = props as any;
+            return (
+              <a
+                {...rest}
+                href={href}
+                target="_blank"
+                rel="noreferrer"
+                className="text-sky-400 hover:text-sky-300 underline underline-offset-2"
+                onClick={(event) => {
+                  event.preventDefault();
+                  if (!href) return;
+                  try {
+                    const destination = new URL(href);
+                    if (destination.protocol === 'http:' || destination.protocol === 'https:') {
+                      void invoke('open_url', { url: destination.toString() });
+                    }
+                  } catch {
+                    // Links invalidos ou esquemas nao HTTP(S) sao ignorados.
+                  }
+                }}
+              >
+                {children}
+              </a>
+            );
+          },
           code(props) {
             const { children, className, ...rest } = props as any;
             const matchLang = /language-(\w+)/.exec(className || '');

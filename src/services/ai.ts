@@ -122,6 +122,8 @@ export async function* streamAIResponse({
       contextLength: settings.ollamaContextLength || 8192,
       customHost: settings.ollamaHost,
       customPath: settings.ollamaCustomPath,
+      googleSearch: settings.googleSearch,
+      searxngHost: settings.searxngHost,
       signal,
     });
     return;

@@ -149,7 +149,7 @@ export const RunSettingsDrawer: React.FC<RunSettingsDrawerProps> = ({
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-mono text-zinc-400 font-semibold uppercase tracking-wider flex items-center gap-1.5">
               <Globe size={13} className="text-indigo-400" />
-              <span>Google Search Grounding</span>
+              <span>{model.provider === 'ollama' ? 'Pesquisa Web (SearXNG)' : 'Google Search Grounding'}</span>
             </span>
             {!caps.supportsSearch && (
               <span
@@ -256,14 +256,14 @@ export const RunSettingsDrawer: React.FC<RunSettingsDrawerProps> = ({
 
           {caps.supportsContextAdjustment ? (
             <div className="space-y-1.5">
-              <div className="grid grid-cols-4 gap-1 font-mono text-[11px]">
-                {[4096, 8192, 16384, 32768].map((val) => (
+              <div className="grid grid-cols-3 gap-1 font-mono text-[11px]">
+                {[4096, 8192, 16384].map((val) => (
                   <button
                     key={val}
                     type="button"
                     onClick={() => updateSetting('contextLength', val)}
                     className={`py-1 rounded border transition cursor-pointer text-center ${
-                      (runSettings.contextLength || 8192) === val
+                      (runSettings.contextLength || 4096) === val
                         ? 'bg-emerald-950/70 text-emerald-300 border-emerald-500/60 font-bold'
                         : 'bg-[#080a0f] text-zinc-400 border-[#1e2535] hover:text-white'
                     }`}
@@ -273,7 +273,7 @@ export const RunSettingsDrawer: React.FC<RunSettingsDrawerProps> = ({
                 ))}
               </div>
               <p className="text-[10px] text-zinc-500 font-mono">
-                Recomendado para sua GPU de 12GB com modelo 14B: <strong>8k tokens</strong> (100% dentro da VRAM).
+                Para a RTX 2060 Super de 8 GB: comece com <strong>4k tokens</strong>; 8k depende do modelo e da memória disponível.
               </p>
             </div>
           ) : (

@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Um cliente desktop ultrarrápido, leve e elegante para o Google Gemini.",
+  "description": "Cliente desktop multimodal de IA com inferencia local, pesquisa web e ferramentas para desenvolvimento.",
   "author": "Samuel Spineli <https://github.com/samuelspineli34>",
   "license": "MIT",
   "repository": {
@@ -31,10 +31,14 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "setup:local-ai": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-local-ai.ps1",
+    "setup:search": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-searxng.ps1",
+    "test:local-ai": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-local-ai.ps1"
   },
   "dependencies": {
     "@google/genai": "^2.18.0",
+    "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-opener": "^2.5.4",
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-updater": "^2.10.1",

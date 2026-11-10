@@ -73,6 +73,8 @@ export interface Settings {
   ollamaCustomPath?: string;
   ollamaHost?: string;
   ollamaContextLength?: number;
+  searxngHost?: string;
+  searxngHost?: string;
 
   // Segurança do Agente
   requireActionConfirmation?: boolean;

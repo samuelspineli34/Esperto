@@ -2,150 +2,292 @@
 
 # Esperto
 
-**High-performance desktop AI client for multiple Large Language Models.**
+**Cliente desktop de IA para desenvolvimento de software, modelos locais e pesquisa na web.**
 
-[![MIT License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Tauri](https://img.shields.io/badge/Tauri-v2-orange?logo=tauri)](https://tauri.app)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.9.3-blue?logo=typescript)](https://www.typescriptlang.org/)
-[![TailwindCSS](https://img.shields.io/badge/TailwindCSS-4.3.3-38bdf8?logo=tailwind-css)](https://tailwindcss.com/)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Tauri](https://img.shields.io/badge/Tauri-v2-orange?logo=tauri)](https://v2.tauri.app/)
+[![React](https://img.shields.io/badge/React-18-61dafb?logo=react)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue?logo=typescript)](https://www.typescriptlang.org/)
+[![Ollama](https://img.shields.io/badge/Ollama-local%20inference-black)](https://ollama.com/)
 
 </div>
 
 ---
 
-## About the Project
+## 1. Visao geral
 
-**Esperto** is a native high-performance desktop AI client built to provide fine-grained control over conversations, codebases, and language models.
+Esperto e um cliente desktop nativo baseado em Tauri 2, Rust, React e TypeScript. O projeto combina provedores de IA em nuvem com inferencia local por Ollama, contexto de projetos locais, conversas persistentes e ferramentas de desenvolvimento.
 
-Unlike resource-heavy Electron wrappers, Esperto relies on **Tauri v2 (Rust)** combined with **React 18 and TypeScript**, running with minimal RAM usage (<50MB) and delivering real-time streaming responses across multiple AI providers.
+Esta versao amplia o provedor Ollama com entrada multimodal, recuperacao de pesquisa web via SearXNG e extracao controlada de texto de paginas publicas. A inferencia do modelo permanece local; somente as consultas de pesquisa e as paginas explicitamente recuperadas trafegam pela internet.
 
----
+## 2. Arquitetura
 
-## Key Features & Architecture
+```text
+Esperto Desktop
+|
++-- React 18 / TypeScript
+|   +-- Conversas e historico (Dexie / IndexedDB)
+|   +-- Anexos e imagens
+|   +-- Selecao de modelos
+|   +-- Configuracoes por conversa
+|   +-- Contexto de workspace
+|
++-- Tauri 2 / Rust
+|   +-- Comandos nativos e acesso a arquivos
+|   +-- Cliente Ollama (HTTP streaming)
+|   +-- Pesquisa web (SearXNG JSON API)
+|   +-- Extracao de texto de paginas HTTP(S)
+|
++-- Servicos locais
+    +-- Ollama: http://127.0.0.1:11434
+    +-- SearXNG: http://127.0.0.1:8080
+```
 
-### 1. Multi-Provider AI Router (BYOK)
-Native, decoupled support for leading market APIs, allowing instant switching between providers:
-- **Google Gemini:** Gemini 3.7 Flash, Gemini 3.6 Flash, Gemini 3.5 Flash Lite, and Pro/Image models with Thinking and Google Search Grounding support.
-- **Anthropic Claude:** Claude 3.7 Sonnet (with configurable Extended Thinking), Claude 3.5 Sonnet, Claude 3.5 Haiku, and Claude 3 Opus with multimodal Base64 image blocks.
-- **OpenAI ChatGPT:** GPT-4o, GPT-4o Mini, GPT-4.5 Preview, o1, and o3-mini (with `reasoning_effort` tuning).
-- **DeepSeek:** DeepSeek V3 (Chat) and DeepSeek R1 (Reasoner with native Chain of Thought).
-- **OpenRouter:** Unified gateway to 200+ additional models (including Meta Llama 3.3 70B/405B, Mistral Codestral, Qwen 2.5 Coder, and free models via the `:free` suffix).
-- **Ollama (Local & Offline AI):** Direct integration with local Ollama instances (`http://localhost:11434`).
-- **Custom OpenAI-compatible servers:** Add multiple local or remote endpoints (LM Studio, llama.cpp, Ollama `/v1`, vLLM and compatible servers), discover their models and use streaming responses.
+### Pesquisa web
 
-### 2. Local Multi-Directory Context (Smart Codebase RAG)
-- **Native Rust File Scanner:** The Rust backend recursively scans selected local folders while applying strict filters to ignore dependencies (`node_modules`, `target`, `dist`, `.git`), binary files, and heavy lockfiles.
-- **Lexical Relevance Scoring:** Analyzes user queries and injects only the most pertinent code files into the prompt along with the project's structural file tree manifest.
-- **Dynamic Token Budgeting:** Restricts file payload to a safe character budget (~45,000 tokens), preventing Per-Minute Rate Limit errors (`429: Resource Exhausted`).
-- **Workspace Presets:** Save folder groupings as named workspaces in the local database for one-click loading.
+Ao ativar **Pesquisa Web em Tempo Real** nas configuracoes da conversa, o provedor Ollama:
 
-### 3. Live Artifacts & Interactive Sandbox
-- Automatically detects structured code outputs (HTML, SVG, Tailwind CSS, JSX/TSX).
-- Renders generated code in real-time inside an isolated iframe sandbox, allowing instant preview of components, dashboards, and interactive UIs without external deployment.
-- Seamlessly toggle between rendered previews and raw source code with expansion and copying tools.
+1. Envia a consulta para a API JSON do SearXNG.
+2. Seleciona ate dois resultados publicos.
+3. Tenta extrair o texto das paginas, com limite de tamanho e tempo.
+4. Injeta os resultados no prompt como conteudo externo nao confiavel.
+5. Instrui o modelo a citar as fontes usando links Markdown.
 
-### 4. Multimodal & Clipboard Integration
-- Support for image uploads (PNG, JPG, WEBP, GIF) and documents (PDF, TXT, source code).
-- Direct clipboard capture (`Ctrl + V`), enabling screenshots and image snips to be pasted directly into the input field.
-- Automatic detection of long pasted text blocks (>800 characters), encapsulating them into token-metered code snippets.
+Se o SearXNG estiver indisponivel, a conversa continua sem pesquisa e o prompt informa ao modelo que a recuperacao falhou. O Esperto nao deve afirmar que pesquisou quando nao recebeu fontes.
 
-### 5. Inference Control & Global Memory
-- **Persistent Global Memory:** A persistent context field injected across all sessions to preserve developer identity, tech stack preferences, and formatting guidelines.
-- **Inference Tuning:** Sliders for Temperature, Top-P, Max Output Tokens, Thinking Level, and Media Resolution (Low / High).
-- **Web Search:** Optional Google Search Grounding enablement on compatible models.
+O mecanismo e independente do Google. O SearXNG agrega motores configurados, incluindo Google quando disponivel, e pode recorrer a outros motores. A disponibilidade depende de bloqueios, CAPTCHA, limites e politicas dos provedores de busca.
 
-### 6. Session & Productivity Management
-- **In-place Message Editing:** Edit previous user messages, truncate subsequent history, and instantly re-trigger execution flow.
-- **Response Regeneration:** Dedicated button to request a fresh generation of the last assistant response.
-- **Code Block Copying:** Syntax identifier and standalone copy button tailored to individual code snippets.
-- **Stream Cancellation (`AbortController`):** Immediate termination of token streaming upon clicking the stop button.
-- **Real-Time Stopwatch:** Numeric response generation timer tracking token emission latency.
-- **Token Counter & Meter:** Context consumption estimator based on character-to-token heuristics with visual warning thresholds.
-- **Markdown Export:** Generate structured `.md` files containing the full conversation session.
+## 3. Hardware recomendado
 
-### 7. Updates & Local Persistence
-- **Secure Local Persistence:** Conversations, configurations, and API keys are stored exclusively on-device via IndexedDB (Dexie.js).
-- **Integrated Updater:** Native update checker tied directly to GitHub Releases for seamless binary distribution.
+Configuracao de referencia para desenvolvimento local:
 
----
+| Componente | Equipamento | Perfil recomendado |
+|---|---|---|
+| GPU | NVIDIA RTX 2060 Super 8 GB | Qwen3-VL 4B Q4 |
+| CPU | AMD Ryzen 5 5600 | Inferencia assistida por GPU |
+| RAM | 16 GB | Um modelo carregado por vez |
+| Contexto inicial | 4.096 tokens | Aumentar para 8.192 apos validar VRAM |
 
-## Tech Stack
+O uso de VRAM varia com driver, versao do Ollama, tamanho de imagem, cache KV, contexto e outros processos graficos. Nao existe garantia de que todo o modelo permanecera na GPU em qualquer configuracao. Verifique a distribuicao com `ollama ps` e o uso de memoria com `nvidia-smi`.
 
-- **Desktop Core:** [Tauri v2](https://tauri.app/) (Rust)
-- **Frontend:** [React 18](https://react.dev/) & [TypeScript 5.9](https://www.typescriptlang.org/)
-- **Build Tool:** [Vite 8](https://vitejs.dev/)
-- **Styling:** [Tailwind CSS v4](https://tailwindcss.com/)
-- **Local Database:** [Dexie.js](https://dexie.org/) (IndexedDB)
-- **Markdown Rendering:** `react-markdown` & `react-syntax-highlighter` (Prism vscDarkPlus)
-- **Icons:** [Lucide Icons](https://lucide.dev/)
-- **AI SDKs:** `@google/genai` and native HTTP adapters for OpenAI, Anthropic, DeepSeek, and Ollama.
+### Modelos recomendados
 
----
+| Finalidade | Modelo Ollama | Entrada visual | Observacao |
+|---|---|---|---|
+| Assistente multimodal principal | `qwen3-vl:4b` | Sim | Melhor ponto de partida para 8 GB |
+| Programacao textual | `qwen2.5-coder:7b` | Nao | Alternativa especializada em codigo |
 
-## Installation & Local Setup
+Os modelos sao carregados sob demanda. Em uma GPU de 8 GB, mantenha apenas um modelo carregado por vez. Qwen3-VL 4B no catalogo Ollama usa quantizacao Q4_K_M para o modelo e projetor visual separado; o tamanho em disco nao representa o consumo total de VRAM.
 
-### Prerequisites
+Fontes dos modelos:
+- [Ollama: Qwen3-VL](https://ollama.com/library/qwen3-vl)
+- [Ollama: Qwen2.5-Coder](https://ollama.com/library/qwen2.5-coder)
+- [Hugging Face: Qwen3-VL-4B-Instruct-GGUF](https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF)
+- [Hugging Face: Qwen2.5-Coder-7B-Instruct-GGUF](https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF)
 
-Ensure the following tools are installed on your machine:
-1. [Node.js](https://nodejs.org/) (version 20+) or [Bun](https://bun.sh/)
-2. [Rust & Cargo](https://www.rust-lang.org/tools/install) (stable version)
-3. OS build dependencies (C++ Build Tools on Windows or `libwebkit2gtk-4.1-dev` on Linux)
+## 4. Requisitos de desenvolvimento
 
-### Step-by-Step
+- Windows 10 22H2 ou Windows 11.
+- Node.js 20 ou superior.
+- npm.
+- Rust stable e Cargo.
+- Microsoft C++ Build Tools / Visual Studio Build Tools com MSVC.
+- WebView2 Runtime.
+- Driver NVIDIA atualizado.
+- Ollama para inferencia local (0.12.7 ou superior para Qwen3-VL).
+- Docker Desktop com Docker Compose para SearXNG local.
 
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/samuelspineli34/Esperto.git
-   cd Esperto
+Referencias:
+- [Node.js](https://nodejs.org/)
+- [Rust](https://www.rust-lang.org/tools/install)
+- [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)
+- [Ollama para Windows](https://ollama.com/download/windows)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 
-2. **Install dependencies:**
-   ```bash
-    npm install
-   ```
+## 5. Instalacao
 
-3. **Start development mode with hot-reload:**
-   ```bash
-    npm run tauri:dev
-   ```
----
+### 5.1 Dependencias do projeto
 
-## Production Build
+No diretorio raiz:
 
-To compile optimized binaries for your operating system:
+```powershell
+npm install
+```
 
-```bash
+### 5.2 Instalar e baixar os modelos locais
+
+Abra PowerShell no diretorio raiz e execute:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\scripts\setup-local-ai.ps1
+```
+
+O script verifica o Ollama e baixa:
+- `qwen3-vl:4b`
+- `qwen2.5-coder:7b`
+
+Para baixar somente o modelo visual:
+
+```powershell
+.\scripts\setup-local-ai.ps1 -SkipCoderModel
+```
+
+Para baixar somente o modelo de codigo:
+
+```powershell
+.\scripts\setup-local-ai.ps1 -SkipVisionModel
+```
+
+O instalador oficial do Ollama e utilizado quando o comando `ollama` nao esta disponivel e o WinGet esta instalado. Caso contrario, instale manualmente pelo link oficial.
+
+### 5.3 Instalar a pesquisa web local
+
+Instale e inicie o Docker Desktop. Depois execute:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\scripts\setup-searxng.ps1
+```
+
+O script cria `infra/searxng/.env` com um segredo aleatorio e inicia o SearXNG em `127.0.0.1:8080`. O servico fica vinculado ao loopback e nao e publicado na rede local.
+
+Teste manual:
+
+```powershell
+Invoke-RestMethod "http://127.0.0.1:8080/search?q=ollama&format=json"
+```
+
+A configuracao `infra/searxng/settings.yml` habilita os formatos HTML e JSON. A API JSON e necessaria para a integracao do Esperto.
+
+Comandos de manutencao:
+
+```powershell
+cd infra/searxng
+docker compose --env-file .env -f docker-compose.yml ps
+docker compose --env-file .env -f docker-compose.yml logs -f
+docker compose --env-file .env -f docker-compose.yml down
+```
+
+### 5.4 Executar o Esperto
+
+Na raiz do projeto:
+
+```powershell
+npm run tauri:dev
+```
+
+Para gerar instaladores:
+
+```powershell
 npm run tauri:build
 ```
 
-Compiled deliverables will be generated in `src-tauri/target/release/bundle/`:
-- **Windows:** `.exe` (NSIS installer) and `.msi`
-- **Linux:** `.deb` and `.AppImage`
-- **macOS:** `.dmg` and `.app`
+## 6. Configuracao dentro do Esperto
 
----
+1. Abra **Configuracoes > Ollama & GPU**.
+2. Confirme o endereco `http://127.0.0.1:11434`.
+3. Defina a janela de contexto inicial em **4k**.
+4. Atualize a lista de modelos instalados.
+5. Em **Configuracoes > Modelos & Servidores**, selecione `Ollama: qwen3-vl:4b` para conversas multimodais.
+6. Para tarefas de codigo sem imagens, selecione `Ollama: qwen2.5-coder:7b`.
+7. Em **Configuracoes > Ollama & GPU**, defina SearXNG como `http://127.0.0.1:8080`.
+8. Abra as configuracoes da conversa e habilite **Pesquisa Web em Tempo Real** quando precisar de fontes atuais.
 
-## API Provider Configuration
+O controle de pesquisa web e por conversa. Ele nao envia automaticamente todas as mensagens para mecanismos externos.
 
-Esperto operates under a **BYOK (Bring Your Own Key)** model. Obtain your keys directly from the respective provider dashboards:
-- [Google AI Studio](https://aistudio.google.com/)
-- [OpenRouter](https://openrouter.ai/keys)
-- [DeepSeek Platform](https://platform.deepseek.com/)
-- [Anthropic Console](https://console.anthropic.com/)
-- [OpenAI Platform](https://platform.openai.com/)
-- [Ollama](https://ollama.com/) (Local instance running on default port `11434`)
+## 7. Imagens e multimodalidade
 
-API keys are stored exclusively in your local application storage.
+O provedor Ollama envia anexos de imagem como Base64 no campo `images` da API `/api/chat`. O nome do modelo e verificado para evitar o envio de imagens a modelos textuais sem capacidade visual.
 
----
+Modelos visuais reconhecidos incluem nomes com `vl`, `vision`, `llava`, `moondream` e `minicpm`. A lista de capacidades exibida pelo Esperto e inferida a partir do identificador do modelo; confirme a ficha do modelo antes de utiliza-lo.
 
-## License
+## 8. Pesquisa, privacidade e seguranca
 
-<p align="left">
-  This project is open-source and available under the terms of the <a href="LICENSE">MIT License</a>.
-</p>
+- A inferencia local e realizada pelo Ollama. As mensagens enviadas ao provedor local nao sao submetidas a moderacao de uma API de nuvem, mas o alinhamento e as recusas aprendidas durante o treinamento ainda dependem do modelo; nao existe garantia de comportamento totalmente sem censura.
+- A pesquisa web envia a consulta ao SearXNG e aos motores externos configurados nele.
+- A recuperacao de paginas envia requisicoes HTTP(S) para os sites selecionados.
+- O texto das paginas e tratado como dado nao confiavel, nunca como instrucao de sistema.
+- O extrator limita a resposta a 1,5 MB antes de converter HTML em texto e limita o conteudo injetado no prompt.
+- URLs com esquemas diferentes de HTTP/HTTPS, hosts locais e enderecos IP privados/loopback sao recusados pelo extrator.
+- SearXNG fica exposto somente em `127.0.0.1`.
+- Chaves de API e arquivos `.env` nao devem ser versionados.
 
----
+A validacao de host impede destinos locais explicitos, mas nao substitui um firewall ou uma politica de rede contra DNS malicioso. Nao exponha a instancia SearXNG publicamente sem revisar a documentacao oficial e a configuracao de seguranca.
 
-<div align="center">
-  <sub style="color: #71717a;">Built with Tauri v2, React, and TypeScript. Maintained by <a href="https://www.linkedin.com/in/samuel-spineli/">Samuel Spineli</a> • 2026</sub>
-</div>
+## 9. Diagnostico
+
+Execute:
+
+```powershell
+.\scripts\test-local-ai.ps1
+```
+
+Verifique o Ollama:
+
+```powershell
+ollama list
+ollama ps
+nvidia-smi
+```
+
+Se o modelo nao utilizar toda a GPU, reduza o contexto para 4k, feche aplicacoes que consomem VRAM e confira a coluna `PROCESSOR` em `ollama ps`.
+
+Se a pesquisa retornar erro:
+- Confirme se Docker Desktop esta em execucao.
+- Verifique `docker compose logs` em `infra/searxng`.
+- Teste `http://127.0.0.1:8080/search?q=test&format=json`.
+- Confirme se o campo `search.formats` contem `json`.
+- Considere que motores externos podem estar temporariamente indisponiveis ou bloqueando requisicoes.
+
+## 10. Dependencias Python opcionais
+
+A aplicacao desktop nao utiliza Python para inferencia, pesquisa ou leitura de paginas. `requirements.txt` contem somente dependencias do prototipo FastAPI legado em `main.py`; PyTorch foi removido por nao participar do fluxo atual e por adicionar uma instalacao pesada desnecessaria.
+
+Para instalar o ambiente Python opcional:
+
+```powershell
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+## 11. Estrutura relevante
+
+```text
+src/
+  components/
+  lib/
+  services/
+    ai.ts
+    ollama.ts
+    ...
+src-tauri/
+  src/
+    lib.rs
+  Cargo.toml
+infra/
+  searxng/
+    docker-compose.yml
+    settings.yml
+scripts/
+  setup-local-ai.ps1
+  setup-searxng.ps1
+  test-local-ai.ps1
+```
+
+## 12. Build e verificacao
+
+```powershell
+npm run build
+cd src-tauri
+cargo check
+cd ..
+npm run tauri:build
+```
+
+A compilacao do frontend e do backend deve ser validada no ambiente Windows de destino, especialmente para conferir toolchain MSVC, WebView2, drivers NVIDIA e o instalador final.
+
+## 13. Licenca
+
+Projeto distribuido sob a licenca MIT. Consulte [LICENSE](LICENSE).

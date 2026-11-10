@@ -69,7 +69,8 @@ const defaultSettings: Settings = {
   googleSearch: false,
   requireActionConfirmation: true,
   ollamaHost: 'http://127.0.0.1:11434',
-  ollamaContextLength: 8192,
+  ollamaContextLength: 4096,
+  searxngHost: 'http://127.0.0.1:8080',
 };
 
 interface LoadedFile {
@@ -173,7 +174,7 @@ export default function App() {
         topP: settings.topP ?? 0.9,
         thinkingLevel: settings.thinkingLevel || 'off',
         googleSearch: settings.googleSearch ?? false,
-        contextLength: settings.ollamaContextLength || 8192,
+        contextLength: settings.ollamaContextLength || 4096,
         mediaResolution: settings.mediaResolution || 'default',
       }
     );
@@ -1088,7 +1089,7 @@ export default function App() {
                 topP: 0.9,
                 thinkingLevel: 'off',
                 googleSearch: false,
-                contextLength: 8192,
+                contextLength: 4096,
                 mediaResolution: 'default',
               });
             }}

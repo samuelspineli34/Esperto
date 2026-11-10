@@ -1,0 +1,6 @@
+# Dependencias do servico Python legado/opcional (main.py).
+# A aplicacao desktop e a pesquisa web nao dependem deste ambiente Python.
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.30,<1.0
+pydantic>=2.8,<3.0
+requests>=2.32,<3.0

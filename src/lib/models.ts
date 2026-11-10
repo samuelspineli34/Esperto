@@ -290,8 +290,8 @@ export function registerLocalOllamaModels(tags: OllamaModelTag[]) {
       inputPrice: 0,
       outputPrice: 0,
       priceNote: '100% Local (GPU)',
-      supportsImages: true,
-      supportsSearch: false,
+      supportsImages: /vl|vision|llava|moondream|minicpm/i.test(t.name),
+      supportsSearch: true,
       isLocal: true,
     };
   });
@@ -367,7 +367,7 @@ export function getModelCapabilities(modelId: string): ModelCapabilities {
     lower.startsWith('o1') ||
     lower.startsWith('o3');
 
-  const supportsSearch = provider === 'gemini';
+  const supportsSearch = provider === 'gemini' || provider === 'ollama';
   const supportsContextAdjustment = provider === 'ollama' || provider === 'custom';
   const supportsMediaResolution =
     provider === 'gemini' || lower.includes('vl') || lower.includes('vision') || lower.includes('gpt-4o');
@@ -378,7 +378,7 @@ export function getModelCapabilities(modelId: string): ModelCapabilities {
     supportsThinking,
     thinkingLockReason: !supportsThinking ? 'Este modelo não suporta Thinking/CoT.' : undefined,
     supportsSearch,
-    searchLockReason: !supportsSearch ? 'Grounding com Google Search exclusivo para Gemini.' : undefined,
+    searchLockReason: !supportsSearch ? 'Pesquisa web não disponível para este provedor.' : undefined,
     supportsContextAdjustment,
     contextLockReason: !supportsContextAdjustment ? 'Contexto fixo na nuvem.' : undefined,
     supportsMediaResolution,
