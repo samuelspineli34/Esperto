@@ -4,6 +4,7 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+use tauri::{Emitter, Manager};
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct FileContext {
@@ -142,27 +143,7 @@ fn start_ollama_service(custom_path: Option<String>, custom_host: Option<String>
         return Ok("Ollama já está ativo em segundo plano.".to_string());
     }
 
-    let mut exec_path = "ollama".to_string();
-
-    if let Some(p) = custom_path {
-        let trimmed = p.trim().replace("\"", "").replace("'", "");
-        if !trimmed.is_empty() && Path::new(&trimmed).exists() {
-            exec_path = trimmed;
-        }
-    } else {
-        #[cfg(target_os = "windows")]
-        {
-            if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
-                let default_win_path = PathBuf::from(&local_app_data)
-                    .join("Programs")
-                    .join("Ollama")
-                    .join("ollama.exe");
-                if default_win_path.exists() {
-                    exec_path = default_win_path.to_string_lossy().to_string();
-                }
-            }
-        }
-    }
+    let exec_path = find_ollama_executable(custom_path);
 
     let mut cmd = std::process::Command::new(&exec_path);
     cmd.arg("serve");
@@ -292,7 +273,8 @@ fn import_gguf_to_ollama(model_name: String, gguf_path: String) -> Result<String
     fs::write(&modelfile_path, modelfile_content)
         .map_err(|e| format!("Erro ao criar Modelfile temporário: {}", e))?;
 
-    let output = std::process::Command::new("ollama")
+    let ollama_exe = find_ollama_executable(None);
+    let output = std::process::Command::new(&ollama_exe)
         .args(["create", &clean_name, "-f", &modelfile_path.to_string_lossy()])
         .output()
         .map_err(|e| format!("Falha ao executar 'ollama create': {}", e))?;
@@ -464,6 +446,36 @@ fn external_http_client() -> Result<reqwest::Client, String> {
         .map_err(|e| format!("Não foi possível inicializar o cliente HTTP: {e}"))
 }
 
+
+async fn search_duckduckgo_fallback(query: &str) -> Result<String, String> {
+    let client = reqwest::Client::builder().timeout(Duration::from_secs(20)).user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130 Safari/537.36").build().map_err(|e| e.to_string())?;
+    let response = client.get("https://html.duckduckgo.com/html/").query(&[("q", query)]).send().await.map_err(|e| format!("SearXNG offline e DuckDuckGo indisponível: {e}"))?;
+    if !response.status().is_success() { return Err(format!("SearXNG offline; DuckDuckGo retornou HTTP {}.", response.status())); }
+    let html = response.text().await.map_err(|e| e.to_string())?;
+    let links_re = regex::Regex::new(r#"(?is)<a[^>]*class=["'][^"']*result__a[^"']*["'][^>]*href=["']([^"']+)["'][^>]*>(.*?)</a>"#).map_err(|e| e.to_string())?;
+    let snippet_re = regex::Regex::new(r#"(?is)<a[^>]*class=["'][^"']*result__snippet[^"']*["'][^>]*>(.*?)</a>|<div[^>]*class=["'][^"']*result__snippet[^"']*["'][^>]*>(.*?)</div>"#).map_err(|e| e.to_string())?;
+    let tag_re = regex::Regex::new(r"(?s)<[^>]+>").map_err(|e| e.to_string())?;
+    let mut results = Vec::new();
+    for (index, cap) in links_re.captures_iter(&html).take(8).enumerate() {
+        let href = cap.get(1).map(|m| m.as_str()).unwrap_or("");
+        let ddg_base = reqwest::Url::parse("https://duckduckgo.com/").map_err(|e| e.to_string())?;
+        let mut parsed = match ddg_base.join(href) { Ok(u) => u, Err(_) => continue };
+        if let Some(target) = parsed.query_pairs().find(|(k, _)| k == "uddg").map(|(_, v)| v.to_string()) {
+            if let Ok(decoded) = reqwest::Url::parse(&target) { parsed = decoded; }
+        }
+        if !allowed_external_url(&parsed) { continue; }
+        let raw_title = cap.get(2).map(|m| m.as_str()).unwrap_or("");
+        let title = tag_re.replace_all(raw_title, "").replace("&amp;", "&").replace("&quot;", "\"").trim().to_string();
+        let snippet = snippet_re.captures_iter(&html).nth(index).map(|sc| {
+            let raw = sc.get(1).or_else(|| sc.get(2)).map(|m| m.as_str()).unwrap_or("");
+            tag_re.replace_all(raw, "").replace("&amp;", "&").replace("&quot;", "\"").trim().to_string()
+        }).unwrap_or_default();
+        results.push(WebSearchResult { title, url: parsed.to_string(), snippet, engine: Some("DuckDuckGo (fallback)".to_string()), published_date: None });
+    }
+    if results.is_empty() { return Err("SearXNG está offline e o DuckDuckGo não retornou resultados legíveis. Configure um provedor de pesquisa ou inicie o SearXNG.".to_string()); }
+    serde_json::to_string(&results).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn search_web(query: String, searxng_host: Option<String>) -> Result<String, String> {
     let query = query.trim();
@@ -481,18 +493,12 @@ async fn search_web(query: String, searxng_host: Option<String>) -> Result<Strin
     }
     let endpoint = parsed.join("search").map_err(|e| e.to_string())?;
     let client = external_http_client()?;
-    let response = client.get(endpoint)
-        .query(&[
-            ("q", query),
-            ("format", "json"),
-            ("language", "pt-BR"),
-            ("safesearch", "0"),
-        ])
-        .send().await.map_err(|e| format!("Falha ao consultar SearXNG: {e}"))?;
-
-    if !response.status().is_success() {
-        return Err(format!("SearXNG retornou HTTP {}. Verifique se o formato JSON está habilitado.", response.status()));
-    }
+    let response = match client.get(endpoint)
+        .query(&[("q", query), ("format", "json"), ("language", "pt-BR"), ("safesearch", "0")])
+        .send().await {
+        Ok(response) if response.status().is_success() => response,
+        _ => return search_duckduckgo_fallback(query).await,
+    };
     let payload: serde_json::Value = response.json().await
         .map_err(|e| format!("Resposta JSON inválida do SearXNG: {e}"))?;
     let mut results = Vec::new();
@@ -569,6 +575,133 @@ async fn fetch_webpage_text(url: String) -> Result<String, String> {
     Ok(text.chars().take(14000).collect())
 }
 
+
+#[derive(Serialize)]
+struct HfModelResult { id: String, downloads: u64, likes: u64 }
+
+#[derive(Serialize)]
+struct HfFileResult { path: String, size: u64 }
+
+fn find_ollama_executable(custom_path: Option<String>) -> String {
+    if let Some(p) = custom_path {
+        let trimmed = p.trim().trim_matches('"').trim_matches('\'');
+        if !trimmed.is_empty() && Path::new(trimmed).exists() { return trimmed.to_string(); }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+            let candidate = PathBuf::from(local_app_data).join("Programs").join("Ollama").join("ollama.exe");
+            if candidate.exists() { return candidate.to_string_lossy().to_string(); }
+        }
+        if let Ok(program_files) = std::env::var("ProgramW6432") {
+            let candidate = PathBuf::from(program_files).join("Ollama").join("ollama.exe");
+            if candidate.exists() { return candidate.to_string_lossy().to_string(); }
+        }
+    }
+    "ollama".to_string()
+}
+
+#[tauri::command]
+fn install_ollama() -> Result<String, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let output = std::process::Command::new("winget")
+            .args(["install", "--id", "Ollama.Ollama", "-e", "--silent", "--accept-package-agreements", "--accept-source-agreements"])
+            .output()
+            .map_err(|e| format!("Não foi possível iniciar o instalador do Ollama pelo Windows Package Manager (winget): {e}. Instale pelo site oficial https://ollama.com/download/windows."))?;
+        let result = format!("{}\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        if output.status.success() { Ok(result.trim().to_string()) }
+        else { Err(format!("Instalação do Ollama falhou (código {:?}): {}", output.status.code(), result.trim())) }
+    }
+    #[cfg(not(target_os = "windows"))]
+    { Err("A instalação automática está preparada para Windows. Consulte https://ollama.com/download para outros sistemas.".to_string()) }
+}
+
+#[tauri::command]
+fn diagnose_local_ai() -> Result<String, String> {
+    let ollama_path = find_ollama_executable(None);
+    let ollama_installed = Path::new(&ollama_path).exists() || std::process::Command::new(&ollama_path).arg("--version").output().map(|o| o.status.success()).unwrap_or(false);
+    let gpu = std::process::Command::new("nvidia-smi")
+        .args(["--query-gpu=name,memory.total,memory.free", "--format=csv,noheader,nounits"])
+        .output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+    let gpu_available = gpu.is_some();
+    let payload = serde_json::json!({
+        "platform": std::env::consts::OS,
+        "ollamaInstalled": ollama_installed,
+        "ollamaPath": if ollama_installed { Some(ollama_path) } else { None::<String> },
+        "gpu": gpu,
+        "gpuAvailable": gpu_available,
+        "ollamaOnline": TcpStream::connect_timeout(&"127.0.0.1:11434".parse().unwrap(), Duration::from_millis(300)).is_ok()
+    });
+    serde_json::to_string(&payload).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn search_huggingface_gguf(query: String) -> Result<String, String> {
+    let q = query.trim();
+    if q.len() < 2 || q.len() > 120 { return Err("Digite pelo menos 2 caracteres (máximo 120).".to_string()); }
+    let client = reqwest::Client::builder().timeout(Duration::from_secs(20)).user_agent("EspertoDesktop/0.2").build().map_err(|e| e.to_string())?;
+    let response = client.get("https://huggingface.co/api/models")
+        .query(&[("search", q), ("filter", "gguf"), ("limit", "15"), ("sort", "downloads"), ("direction", "-1")])
+        .send().await.map_err(|e| format!("Falha ao consultar Hugging Face: {e}"))?;
+    if !response.status().is_success() { return Err(format!("Hugging Face retornou HTTP {}", response.status())); }
+    let rows: Vec<serde_json::Value> = response.json().await.map_err(|e| format!("Resposta inválida do Hugging Face: {e}"))?;
+    let models: Vec<HfModelResult> = rows.into_iter().filter_map(|v| Some(HfModelResult {
+        id: v.get("id")?.as_str()?.to_string(),
+        downloads: v.get("downloads").and_then(|x| x.as_u64()).unwrap_or(0),
+        likes: v.get("likes").and_then(|x| x.as_u64()).unwrap_or(0),
+    })).collect();
+    serde_json::to_string(&models).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn list_huggingface_gguf_files(repo_id: String) -> Result<String, String> {
+    let repo = repo_id.trim();
+    if repo.is_empty() || repo.len() > 200 || repo.contains("..") || repo.contains('\\') || repo.starts_with('/') { return Err("Identificador de repositório inválido.".to_string()); }
+    let url = format!("https://huggingface.co/api/models/{}/tree/main", repo);
+    let client = reqwest::Client::builder().timeout(Duration::from_secs(20)).user_agent("EspertoDesktop/0.2").build().map_err(|e| e.to_string())?;
+    let response = client.get(url).query(&[("recursive", "true"), ("expand", "true")]).send().await.map_err(|e| e.to_string())?;
+    if !response.status().is_success() { return Err(format!("Não foi possível listar o repositório (HTTP {}). Ele pode ser privado ou exigir autenticação.", response.status())); }
+    let rows: Vec<serde_json::Value> = response.json().await.map_err(|e| e.to_string())?;
+    let files: Vec<HfFileResult> = rows.into_iter().filter_map(|v| {
+        let path = v.get("path")?.as_str()?.to_string();
+        if !path.to_ascii_lowercase().ends_with(".gguf") { return None; }
+        Some(HfFileResult { size: v.get("size").and_then(|x| x.as_u64()).unwrap_or(0), path })
+    }).collect();
+    serde_json::to_string(&files).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn download_huggingface_gguf(app: tauri::AppHandle, repo_id: String, file_name: String) -> Result<String, String> {
+    let repo = repo_id.trim();
+    let file = file_name.trim();
+    if repo.is_empty() || repo.len() > 200 || repo.contains("..") || repo.contains('\\') || repo.starts_with('/') || file.is_empty() || file.starts_with('/') || file.split('/').any(|p| p == "..") {
+        return Err("Repositório ou arquivo inválido.".to_string());
+    }
+    if !file.to_ascii_lowercase().ends_with(".gguf") { return Err("Por segurança, o importador baixa apenas arquivos GGUF.".to_string()); }
+    let url = format!("https://huggingface.co/{}/resolve/main/{}", repo, file);
+    let client = reqwest::Client::builder().timeout(Duration::from_secs(3600)).user_agent("EspertoDesktop/0.2").build().map_err(|e| e.to_string())?;
+    let mut response = client.get(url).send().await.map_err(|e| format!("Falha no download: {e}"))?;
+    if !response.status().is_success() { return Err(format!("Hugging Face retornou HTTP {}. Para repositórios gated/privados, o token HF ainda precisa ser configurado.", response.status())); }
+    let total = response.content_length().unwrap_or(0);
+    if total > 20 * 1024 * 1024 * 1024 { return Err("O arquivo excede o limite de 20 GB deste importador.".to_string()); }
+    let root = app.path().app_local_data_dir().map_err(|e| e.to_string())?.join("models").join("huggingface");
+    fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+    let safe_repo = repo.replace('/', "--");
+    let safe_file = file.replace('/', "_");
+    let destination = root.join(format!("{}-{}", safe_repo, safe_file));
+    let mut output = fs::File::create(&destination).map_err(|e| format!("Não foi possível criar o arquivo local: {e}"))?;
+    let mut downloaded: u64 = 0;
+    while let Some(chunk) = response.chunk().await.map_err(|e| format!("Download interrompido: {e}"))? {
+        downloaded += chunk.len() as u64;
+        output.write_all(&chunk).map_err(|e| format!("Falha ao gravar o modelo: {e}"))?;
+        let _ = app.emit("hf-download-progress", serde_json::json!({"downloaded": downloaded, "total": total}));
+    }
+    output.flush().map_err(|e| e.to_string())?;
+    if downloaded == 0 { let _ = fs::remove_file(&destination); return Err("O arquivo baixado está vazio.".to_string()); }
+    Ok(destination.to_string_lossy().to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -588,7 +721,12 @@ pub fn run() {
             write_file,
             execute_terminal_command,
             download_and_run_installer,
-            fetch_media_from_hf 
+            fetch_media_from_hf,
+            install_ollama,
+            diagnose_local_ai,
+            search_huggingface_gguf,
+            list_huggingface_gguf_files,
+            download_huggingface_gguf
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {

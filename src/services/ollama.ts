@@ -380,3 +380,30 @@ export async function* streamOllama({
     }
   }
 }
+
+export interface HuggingFaceModel { id: string; downloads: number; likes: number }
+export interface HuggingFaceFile { path: string; size: number }
+export interface LocalAIDiagnostics { platform: string; ollamaInstalled: boolean; ollamaPath?: string; gpu?: string | null; gpuAvailable: boolean; ollamaOnline: boolean }
+
+export async function diagnoseLocalAI(): Promise<LocalAIDiagnostics> {
+  const raw = await invoke<string>('diagnose_local_ai');
+  return JSON.parse(raw) as LocalAIDiagnostics;
+}
+
+export async function installOllama(): Promise<string> {
+  return invoke<string>('install_ollama');
+}
+
+export async function searchHuggingFaceGGUF(query: string): Promise<HuggingFaceModel[]> {
+  const raw = await invoke<string>('search_huggingface_gguf', { query });
+  return JSON.parse(raw) as HuggingFaceModel[];
+}
+
+export async function listHuggingFaceGGUFFiles(repoId: string): Promise<HuggingFaceFile[]> {
+  const raw = await invoke<string>('list_huggingface_gguf_files', { repoId });
+  return JSON.parse(raw) as HuggingFaceFile[];
+}
+
+export async function downloadHuggingFaceGGUF(repoId: string, fileName: string): Promise<string> {
+  return invoke<string>('download_huggingface_gguf', { repoId, fileName });
+}

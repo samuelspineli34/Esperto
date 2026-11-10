@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { listen } from '@tauri-apps/api/event';
 import {
   X,
   Sliders,
@@ -34,6 +35,8 @@ import {
   deleteOllamaModel,
   formatBytes,
   OllamaModelTag,
+  diagnoseLocalAI, installOllama, searchHuggingFaceGGUF, listHuggingFaceGGUFFiles, downloadHuggingFaceGGUF,
+  HuggingFaceModel, HuggingFaceFile, LocalAIDiagnostics,
 } from '../services/ollama';
 import { registerLocalOllamaModels, registerCustomProviderModels } from '../lib/models';
 import { inspectProvider } from '../services/providerManager';
@@ -56,7 +59,7 @@ export const SettingsModal: React.FC<Props> = ({
   onErrorTrigger,
 }) => {
   const [form, setForm] = useState<Settings>(initialSettings);
-  const [activeTab, setActiveTab] = useState<'models' | 'ollama' | 'params' | 'keys' | 'memory'>('models');
+  const [activeTab, setActiveTab] = useState<'models' | 'ollama' | 'params' | 'keys' | 'memory'>(() => localStorage.getItem('esperto-local-ai-setup-seen') ? 'models' : 'ollama');
   const [ollamaOnline, setOllamaOnline] = useState(false);
   const [checkingOllama, setCheckingOllama] = useState(false);
   const [startingOllama, setStartingOllama] = useState(false);
@@ -73,6 +76,15 @@ export const SettingsModal: React.FC<Props> = ({
   const [selectedGgufPath, setSelectedGgufPath] = useState('');
   const [isImportingGguf, setIsImportingGguf] = useState(false);
   const [appCacheSize, setAppCacheSize] = useState<string>('Calculando...');
+  const [diagnostics, setDiagnostics] = useState<LocalAIDiagnostics | null>(null);
+  const [installingOllama, setInstallingOllama] = useState(false);
+  const [hfQuery, setHfQuery] = useState('Qwen 3B instruct');
+  const [hfModels, setHfModels] = useState<HuggingFaceModel[]>([]);
+  const [hfRepo, setHfRepo] = useState('');
+  const [hfFiles, setHfFiles] = useState<HuggingFaceFile[]>([]);
+  const [hfSelectedFile, setHfSelectedFile] = useState('');
+  const [hfBusy, setHfBusy] = useState(false);
+  const [hfProgress, setHfProgress] = useState(0);
 
   useEffect(() => {
     setForm(initialSettings);
@@ -104,6 +116,7 @@ export const SettingsModal: React.FC<Props> = ({
 
   const checkOllamaStatusQuick = async () => {
     setCheckingOllama(true);
+    try { setDiagnostics(await diagnoseLocalAI()); } catch { setDiagnostics(null); }
     const online = await checkOllamaRunning(form.ollamaHost);
     setOllamaOnline(online);
     if (online) {
@@ -132,6 +145,53 @@ export const SettingsModal: React.FC<Props> = ({
     } finally {
       setStartingOllama(false);
     }
+  };
+
+  const handleInstallOllama = async () => {
+    setInstallingOllama(true);
+    try {
+      await installOllama();
+      await new Promise((resolve) => setTimeout(resolve, 1800));
+      await startOllama(form.ollamaCustomPath, form.ollamaHost);
+      await checkOllamaStatusQuick();
+    } catch (err: any) {
+      onErrorTrigger({ title: 'Não foi possível instalar o Ollama', context: 'Instalação local', message: err?.message || String(err) });
+    } finally { setInstallingOllama(false); }
+  };
+
+  const handleSearchHF = async () => {
+    setHfBusy(true); setHfModels([]); setHfFiles([]); setHfRepo('');
+    try { setHfModels(await searchHuggingFaceGGUF(hfQuery)); }
+    catch (err: any) { onErrorTrigger({ title: 'Busca no Hugging Face falhou', context: hfQuery, message: err?.message || String(err) }); }
+    finally { setHfBusy(false); }
+  };
+
+  const handleSelectHFRepo = async (repo: string) => {
+    setHfRepo(repo); setHfFiles([]); setHfSelectedFile(''); setHfBusy(true);
+    try { setHfFiles(await listHuggingFaceGGUFFiles(repo)); }
+    catch (err: any) { onErrorTrigger({ title: 'Não foi possível listar os arquivos GGUF', context: repo, message: err?.message || String(err) }); }
+    finally { setHfBusy(false); }
+  };
+
+  const handleDownloadHF = async () => {
+    if (!hfRepo || !hfSelectedFile) return;
+    setHfBusy(true); setHfProgress(0);
+    let unlisten: (() => void) | undefined;
+    try {
+      unlisten = await listen<{ downloaded: number; total: number }>('hf-download-progress', (event) => {
+        const { downloaded, total } = event.payload;
+        if (total > 0) setHfProgress(Math.min(100, Math.round(downloaded / total * 100)));
+      });
+      const path = await downloadHuggingFaceGGUF(hfRepo, hfSelectedFile);
+      const base = hfRepo.split('/').pop() || 'hf-model';
+      const fileBase = hfSelectedFile.split('/').pop()?.replace(/\.gguf$/i, '') || base;
+      const modelName = `${base}-${fileBase}`.toLowerCase().replace(/[^a-z0-9_-]/g, '-').slice(0, 64);
+      await importGgufToOllama(modelName, path);
+      await checkOllamaStatusQuick();
+      alert(`Modelo ${modelName} baixado do Hugging Face e importado no Ollama.`);
+    } catch (err: any) {
+      onErrorTrigger({ title: 'Download/importação do Hugging Face falhou', context: `${hfRepo}/${hfSelectedFile}`, message: err?.message || String(err) });
+    } finally { unlisten?.(); setHfBusy(false); }
   };
 
   const handlePullModel = async (tagToPull?: string) => {
@@ -464,7 +524,30 @@ export const SettingsModal: React.FC<Props> = ({
 
           {activeTab === 'ollama' && (
             <div className="space-y-4">
-              <div className="p-3.5 bg-[#0a0f16] border border-[#1b2f26] rounded-xl space-y-2">
+              <div className="p-3.5 bg-[#0a0d13] border border-[#263044] rounded-xl space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs font-bold text-zinc-100">Assistente de instalação local</div>
+                  <p className="text-[11px] text-zinc-400 mt-1">Instala o Ollama pelo gerenciador oficial do Windows, inicia o serviço e verifica a GPU. Não exige comandos manuais.</p>
+                </div>
+                <button type="button" onClick={handleInstallOllama} disabled={installingOllama || ollamaOnline} className="shrink-0 px-3 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-[11px] disabled:opacity-40">{installingOllama ? 'Instalando...' : ollamaOnline ? 'Ollama ativo' : 'Instalar Ollama'}</button>
+              </div>
+              {diagnostics && <div className="grid grid-cols-2 gap-2 text-[11px]">
+                <div className="rounded bg-[#111722] p-2 text-zinc-300">Ollama: <b className={diagnostics.ollamaInstalled ? 'text-emerald-400' : 'text-amber-400'}>{diagnostics.ollamaInstalled ? 'instalado' : 'não encontrado'}</b></div>
+                <div className="rounded bg-[#111722] p-2 text-zinc-300">Serviço: <b className={diagnostics.ollamaOnline ? 'text-emerald-400' : 'text-amber-400'}>{diagnostics.ollamaOnline ? 'online' : 'offline'}</b></div>
+                <div className="rounded bg-[#111722] p-2 text-zinc-300 col-span-2">GPU: <b>{diagnostics.gpu || 'nvidia-smi não encontrado / GPU NVIDIA indisponível'}</b></div>
+              </div>}
+              <button type="button" onClick={checkOllamaStatusQuick} className="text-[10px] text-indigo-300 hover:text-indigo-200">Atualizar diagnóstico</button>
+            </div>
+
+            <div className="p-3.5 bg-[#0a0d13] border border-[#3a2d1c] rounded-xl space-y-3">
+              <div><div className="text-xs font-bold text-zinc-100">Buscar e instalar GGUF pelo Hugging Face</div><p className="text-[11px] text-zinc-400 mt-1">Pesquise repositórios públicos, escolha um arquivo GGUF, baixe direto para o computador e importe no Ollama. Este fluxo importa GGUF de arquivo único; modelos privados/gated, shards divididos e projetores multimodais separados exigem configuração adicional. Para visão, prefira o botão de instalação do Qwen3-VL na seção de modelos recomendados.</p></div>
+              <div className="flex gap-2"><input value={hfQuery} onChange={e => setHfQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') void handleSearchHF(); }} placeholder="Ex.: Qwen 2.5 Coder 7B GGUF" className="flex-1 min-w-0 bg-[#121622] border border-[#293044] rounded-lg px-3 py-2 text-xs text-white"/><button type="button" onClick={handleSearchHF} disabled={hfBusy || hfQuery.trim().length < 2} className="px-3 rounded-lg bg-indigo-700 text-white text-xs disabled:opacity-40">Buscar</button></div>
+              {hfModels.length > 0 && <div className="max-h-36 overflow-y-auto space-y-1">{hfModels.map(m => <button type="button" key={m.id} onClick={() => void handleSelectHFRepo(m.id)} className={`w-full text-left p-2 rounded border text-[11px] ${hfRepo === m.id ? 'border-indigo-500 bg-indigo-950/30 text-white' : 'border-[#252d40] bg-[#111722] text-zinc-300'}`}><span className="block truncate">{m.id}</span><span className="text-[10px] text-zinc-500">{m.downloads.toLocaleString()} downloads · {m.likes} likes</span></button>)}</div>}
+              {hfRepo && <div className="space-y-2"><div className="text-[10px] text-zinc-400">Arquivos GGUF de <b className="text-zinc-200">{hfRepo}</b></div><select value={hfSelectedFile} onChange={e => setHfSelectedFile(e.target.value)} className="w-full bg-[#121622] border border-[#293044] rounded-lg px-3 py-2 text-xs text-white"><option value="">Selecione um arquivo GGUF...</option>{hfFiles.map(f => <option key={f.path} value={f.path}>{f.path} · {formatBytes(f.size)}</option>)}</select><button type="button" onClick={handleDownloadHF} disabled={hfBusy || !hfSelectedFile || !ollamaOnline} className="w-full py-2 rounded-lg bg-emerald-700 text-white text-xs disabled:opacity-40">{hfBusy ? `Baixando/importando ${hfProgress}%` : 'Baixar e importar no Ollama'}</button>{hfBusy && <div className="h-1.5 rounded bg-[#1a2030] overflow-hidden"><div className="h-full bg-emerald-400" style={{width:`${hfProgress}%`}}/></div>}</div>}
+            </div>
+
+            <div className="p-3.5 bg-[#0a0f16] border border-[#1b2f26] rounded-xl space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Maximize2 size={15} className="text-emerald-400" />
@@ -550,7 +633,7 @@ export const SettingsModal: React.FC<Props> = ({
                   <span className="text-xs font-bold text-zinc-200 font-mono">Pesquisa na Web para modelos locais</span>
                 </div>
                 <p className="text-[11px] text-zinc-400">
-                  Configure a instância SearXNG. A pesquisa é acionada pelo controle de pesquisa nas configurações da conversa; o modelo e o histórico permanecem locais.
+                  SearXNG é opcional. Se não houver uma instância configurada/ativa, o Esperto tenta usar DuckDuckGo automaticamente como alternativa, sem Docker Desktop. As consultas de busca saem para a internet; o modelo e o histórico permanecem locais.
                 </p>
                 <label className="block text-[11px] text-zinc-400 font-mono">URL do SearXNG</label>
                 <input

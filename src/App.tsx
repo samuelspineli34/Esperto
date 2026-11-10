@@ -124,7 +124,7 @@ export default function App() {
   const [useMemory, setUseMemory] = useState(true);
   const [showSystemPrompt, setShowSystemPrompt] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(() => !localStorage.getItem('esperto-local-ai-setup-seen'));
   const [isRunSettingsOpen, setIsRunSettingsOpen] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [settings, setSettings] = useState<Settings>(defaultSettings);
@@ -1188,7 +1188,7 @@ export default function App() {
 
       <SettingsModal
         isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
+        onClose={() => { localStorage.setItem('esperto-local-ai-setup-seen', '1'); setIsSettingsOpen(false); }}
         settings={settings}
         onSave={handleSaveSettings}
         onErrorTrigger={(err) => setActiveError(err)}

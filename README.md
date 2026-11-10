@@ -53,7 +53,7 @@ Ao ativar **Pesquisa Web em Tempo Real** nas configuracoes da conversa, o proved
 4. Injeta os resultados no prompt como conteudo externo nao confiavel.
 5. Instrui o modelo a citar as fontes usando links Markdown.
 
-Se o SearXNG estiver indisponivel, a conversa continua sem pesquisa e o prompt informa ao modelo que a recuperacao falhou. O Esperto nao deve afirmar que pesquisou quando nao recebeu fontes.
+Se o SearXNG estiver indisponivel, o Esperto tenta automaticamente uma busca HTML publica no DuckDuckGo. Essa alternativa nao exige Docker, mas depende da disponibilidade do site e pode ser limitada por bloqueios ou mudancas no HTML. Se ambos falharem, a conversa continua sem fontes e o modelo e informado da falha.
 
 O mecanismo e independente do Google. O SearXNG agrega motores configurados, incluindo Google quando disponivel, e pode recorrer a outros motores. A disponibilidade depende de bloqueios, CAPTCHA, limites e politicas dos provedores de busca.
 
@@ -95,7 +95,7 @@ Fontes dos modelos:
 - WebView2 Runtime.
 - Driver NVIDIA atualizado.
 - Ollama para inferencia local (0.12.7 ou superior para Qwen3-VL).
-- Docker Desktop com Docker Compose para SearXNG local.
+- Docker Desktop com Docker Compose apenas se voce quiser hospedar uma instancia SearXNG local (opcional).
 
 Referencias:
 - [Node.js](https://nodejs.org/)
@@ -143,7 +143,7 @@ O instalador oficial do Ollama e utilizado quando o comando `ollama` nao esta di
 
 ### 5.3 Instalar a pesquisa web local
 
-Instale e inicie o Docker Desktop. Depois execute:
+Opcional: para hospedar sua propria instancia SearXNG, instale e inicie o Docker Desktop. Depois execute:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
@@ -291,3 +291,16 @@ A compilacao do frontend e do backend deve ser validada no ambiente Windows de d
 ## 13. Licenca
 
 Projeto distribuido sob a licenca MIT. Consulte [LICENSE](LICENSE).
+
+## Configuracao pela interface (Windows)
+
+Na primeira abertura, o Esperto exibe a aba **Ollama & GPU**. Nela voce pode:
+
+1. Instalar o Ollama pelo `winget` (sem abrir PowerShell manualmente).
+2. Iniciar o servidor local e verificar se a GPU NVIDIA/VRAM esta visivel via `nvidia-smi`.
+3. Baixar os modelos recomendados diretamente da biblioteca Ollama.
+4. Pesquisar repositorios publicos GGUF no Hugging Face, selecionar um arquivo, acompanhar o download e importar o GGUF de arquivo unico no Ollama.
+5. Usar pesquisa web sem Docker: SearXNG e opcional; quando indisponivel, o Esperto tenta DuckDuckGo como fallback.
+
+O download de modelos exige consentimento do usuario e espaco em disco. O importador Hugging Face atual aceita somente GGUF publico de arquivo unico; repositorios privados/gated, modelos safetensors e modelos multimodais que dependem de projetor separado nao sao importados por esse fluxo. Para modelos de visao como Qwen3-VL, use o perfil recomendado do Ollama.
+
