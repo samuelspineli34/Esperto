@@ -1,3 +1,4 @@
+
 import Dexie, { type Table } from 'dexie';
 
 export interface Attachment {
@@ -66,14 +67,13 @@ export interface Settings {
   anthropicApiKey?: string;
   deepseekApiKey?: string;
   openrouterApiKey?: string;
-  huggingfaceApiKey?: string; // Chave do Hugging Face adicionada
+  huggingfaceApiKey?: string;
   customProviders?: CustomProviderConfig[];
 
   // Ollama & GPU
   ollamaCustomPath?: string;
   ollamaHost?: string;
   ollamaContextLength?: number;
-  searxngHost?: string;
   searxngHost?: string;
 
   // Segurança do Agente
