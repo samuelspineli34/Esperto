@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use tauri::{AppHandle, Manager};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SystemHardwareInfo {
@@ -56,7 +55,7 @@ pub async fn get_system_specs() -> Result<SystemHardwareInfo, String> {
         // 1. Detecção da GPU NVIDIA via nvidia-smi
         if let Ok(output) = Command::new("nvidia-smi")
             .args([
-                "--query-gpu=gpu_name,memory.total,memory.free",
+                "--query-gpu=gpu_name,memory.total",
                 "--format=csv,noheader,nounits",
             ])
             .output()
@@ -76,7 +75,7 @@ pub async fn get_system_specs() -> Result<SystemHardwareInfo, String> {
             }
         }
 
-        // 2. Detecção de Memória RAM total no Windows via PowerShell rápido
+        // 2. Detecção de Memória RAM total no Windows
         if let Ok(output) = Command::new("powershell")
             .args([
                 "-NoProfile",
@@ -194,9 +193,14 @@ pub async fn comfyui_upload_image(
     let target_host = host.trim_end_matches('/');
     let url = format!("{}/upload/image", target_host);
 
+    let clean_b64 = image_base64
+        .replace("data:image/png;base64,", "")
+        .replace("data:image/jpeg;base64,", "")
+        .replace("data:image/webp;base64,", "");
+
     let image_bytes = base64::Engine::decode(
         &base64::engine::general_purpose::STANDARD,
-        image_base64.replace("data:image/png;base64,", "").replace("data:image/jpeg;base64,", ""),
+        clean_b64.trim(),
     )
     .map_err(|e| format!("Erro ao decodificar base64: {}", e))?;
 
@@ -356,7 +360,7 @@ pub async fn download_and_run_installer(url: String) -> Result<String, String> {
     let temp_dir = std::env::temp_dir();
     let installer_path = temp_dir.join("esperto-setup-update.exe");
 
-    let mut response = client
+    let response = client
         .get(&url)
         .send()
         .await
