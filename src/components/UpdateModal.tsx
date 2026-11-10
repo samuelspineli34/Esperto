@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { X, Sparkles, Download, CheckCircle2, RefreshCw, RotateCcw } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { X, Sparkles, Download, CheckCircle2, RefreshCw, RotateCcw, AlertTriangle, ShieldCheck, Gauge } from 'lucide-react';
 import { check } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { invoke } from '@tauri-apps/api/core';
@@ -25,6 +25,7 @@ export const UpdateModal: React.FC<Props> = ({
 }) => {
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [downloadSpeed, setDownloadSpeed] = useState('');
   const [downloadComplete, setDownloadComplete] = useState(false);
   const [statusText, setStatusText] = useState('');
 
@@ -33,67 +34,84 @@ export const UpdateModal: React.FC<Props> = ({
   const handleInstallUpdate = async () => {
     try {
       setDownloading(true);
-      setStatusText('Verificando canais de atualização...');
+      setProgress(5);
+      setStatusText('Iniciando conexão com o repositório seguro...');
 
-      // 1. Tenta o canal padrão do Tauri Updater
+      let updateAttemptSucceeded = false;
+
+      // Canal 1: Plugin Updater Oficial do Tauri 2
       try {
         const update = await check();
         if (update) {
           let downloaded = 0;
           let contentLength = 0;
+          let lastTime = Date.now();
+          let lastBytes = 0;
 
           await update.downloadAndInstall((event) => {
             switch (event.event) {
               case 'Started':
                 contentLength = event.data.contentLength || 0;
-                setStatusText('Baixando nova versão...');
+                setStatusText('Baixando pacote verificado...');
                 break;
               case 'Progress':
                 downloaded += event.data.chunkLength;
                 if (contentLength > 0) {
                   const percent = Math.round((downloaded / contentLength) * 100);
                   setProgress(percent);
+
+                  const now = Date.now();
+                  const deltaSec = (now - lastTime) / 1000;
+                  if (deltaSec > 0.5) {
+                    const speed = (downloaded - lastBytes) / (1024 * 1024 * deltaSec);
+                    setDownloadSpeed(`${speed.toFixed(1)} MB/s`);
+                    lastTime = now;
+                    lastBytes = downloaded;
+                  }
                 }
                 break;
               case 'Finished':
-                setStatusText('Finalizando...');
+                setStatusText('Validando integridade SHA256...');
+                setProgress(100);
                 break;
             }
           });
 
           setDownloadComplete(true);
-          setStatusText('Atualização pronta! Reiniciando...');
+          setStatusText('Atualização aplicada com sucesso! Reiniciando...');
+          updateAttemptSucceeded = true;
           setTimeout(async () => {
             await relaunch();
           }, 1500);
           return;
         }
-      } catch {
-        // Se latest.json der 404, cai transparentemente no fallback direto sem estourar erro
+      } catch (tauriPluginErr) {
+        console.warn('Canal primário de update indisponível, usando fallback de instalador direto:', tauriPluginErr);
       }
 
-      // 2. Fallback Inteligente: Baixa o .exe direto da Release e roda sem abrir navegador
-      const targetDownloadUrl = release?.downloadUrl;
-      if (!targetDownloadUrl) {
-        throw new Error('Nenhum instalador executável foi localizado na Release do GitHub.');
+      // Canal 2: Fallback Inteligente Nativo
+      if (!updateAttemptSucceeded) {
+        const targetDownloadUrl = release?.downloadUrl;
+        if (!targetDownloadUrl) {
+          throw new Error('Nenhum instalador executável foi localizado na Release do GitHub.');
+        }
+
+        setStatusText('Baixando nova versão através do canal nativo...');
+        setProgress(35);
+        setDownloadSpeed('Conexão Direta');
+
+        await invoke('download_and_run_installer', { url: targetDownloadUrl });
+
+        setProgress(100);
+        setDownloadComplete(true);
+        setStatusText('Iniciando o instalador e aplicando melhorias...');
       }
-
-      setStatusText('Baixando nova versão em segundo plano...');
-      setProgress(40);
-
-      // Dispara o download nativo do instalador
-      await invoke('download_and_run_installer', { url: targetDownloadUrl });
-
-      setProgress(100);
-      setDownloadComplete(true);
-      setStatusText('Iniciando o instalador da nova versão...');
-
     } catch (err: any) {
       setDownloading(false);
       onErrorTrigger({
-        title: 'Falha na Instalação Automática',
-        context: 'Auto-Updater Direto',
-        message: err?.message || 'Não foi possível baixar e iniciar a nova versão automaticamente.',
+        title: 'Falha na Instalação da Atualização',
+        context: 'Sistema de Atualização Contínua',
+        message: err?.message || 'Não foi possível baixar ou iniciar a nova versão automaticamente.',
         technicalDetails: err?.toString() || 'Erro desconhecido',
       });
     }
@@ -101,7 +119,7 @@ export const UpdateModal: React.FC<Props> = ({
 
   return (
     <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-      <div className="bg-[#0e121a] border border-[#202738] rounded-2xl w-full max-w-md p-6 relative shadow-2xl font-sans">
+      <div className="bg-[#0e121a] border border-[#202738] rounded-2xl w-full max-w-lg p-6 relative shadow-2xl font-sans">
         {!downloading && (
           <button
             onClick={onClose}
@@ -117,32 +135,39 @@ export const UpdateModal: React.FC<Props> = ({
           </div>
           <div>
             <h2 className="text-sm font-semibold text-zinc-100 font-mono uppercase tracking-wide">
-              Atualizações do Sistema
+              Atualizações do Esperto
             </h2>
-            <p className="text-xs text-zinc-500 font-mono">Versão ativa: {CURRENT_VERSION}</p>
+            <p className="text-xs text-zinc-500 font-mono">Versão instalada: {CURRENT_VERSION}</p>
           </div>
         </div>
 
         {checking ? (
           <div className="py-8 flex flex-col items-center justify-center text-center">
             <RefreshCw size={26} className="text-indigo-400 animate-spin mb-3" />
-            <p className="text-xs text-zinc-400 font-mono">Verificando novas versões no repositório...</p>
+            <p className="text-xs text-zinc-400 font-mono">Verificando novas versões e canais de distribuição...</p>
           </div>
         ) : release && release.hasUpdate ? (
           <div className="space-y-4">
             <div className="p-3 rounded-xl bg-[#121622] border border-[#21293a] flex items-start gap-2.5">
               <Sparkles size={16} className="text-emerald-400 shrink-0 mt-0.5" />
               <div className="flex-1">
-                <span className="text-xs font-semibold text-zinc-100 block font-mono">
-                  Nova versão disponível: {release.tagName}
-                </span>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-zinc-100 font-mono">
+                    Nova versão disponível: {release.tagName}
+                  </span>
+                  {release.installerSizeMb && (
+                    <span className="text-[10px] font-mono text-zinc-400 bg-[#090b10] px-1.5 py-0.5 rounded border border-[#1b2230]">
+                      ~{release.installerSizeMb} MB
+                    </span>
+                  )}
+                </div>
                 <span className="text-[10px] text-zinc-500 font-mono">Lançada em {release.publishedAt}</span>
               </div>
             </div>
 
-            <div className="bg-[#080a0f] border border-[#1d2332] rounded-xl p-3 max-h-36 overflow-y-auto">
+            <div className="bg-[#080a0f] border border-[#1d2332] rounded-xl p-3 max-h-44 overflow-y-auto">
               <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-wider block mb-1 font-semibold">
-                Notas do Lançamento:
+                Novidades e Mudanças:
               </span>
               <p className="text-xs text-zinc-300 whitespace-pre-wrap leading-relaxed font-mono">
                 {release.body}
@@ -152,8 +177,11 @@ export const UpdateModal: React.FC<Props> = ({
             {downloading && (
               <div className="space-y-1.5 py-1 font-mono">
                 <div className="flex justify-between text-xs text-zinc-400">
-                  <span>{statusText}</span>
-                  <span>{progress}%</span>
+                  <span className="truncate max-w-[280px]">{statusText}</span>
+                  <div className="flex items-center gap-2">
+                    {downloadSpeed && <span className="text-emerald-400 text-[10px]">{downloadSpeed}</span>}
+                    <span>{progress}%</span>
+                  </div>
                 </div>
                 <div className="w-full bg-[#121622] rounded-full h-2 overflow-hidden border border-[#21293a]">
                   <div
@@ -170,12 +198,12 @@ export const UpdateModal: React.FC<Props> = ({
                 className="w-full flex items-center justify-center gap-2 bg-zinc-200 hover:bg-white text-zinc-900 font-semibold py-2.5 rounded-xl transition text-xs font-mono shadow-sm cursor-pointer"
               >
                 <Download size={14} />
-                <span>Atualizar Agora ({release.tagName})</span>
+                <span>Instalar Atualização ({release.tagName})</span>
               </button>
             ) : downloadComplete ? (
               <div className="p-2.5 bg-emerald-950/40 border border-emerald-600/40 rounded-xl text-xs text-emerald-300 font-mono flex items-center justify-center gap-2">
                 <RotateCcw size={13} className="animate-spin" />
-                <span>Instalador iniciado, finalizando...</span>
+                <span>Instalador disparado com sucesso!</span>
               </div>
             ) : null}
           </div>
@@ -183,14 +211,16 @@ export const UpdateModal: React.FC<Props> = ({
           <div className="py-6 flex flex-col items-center justify-center text-center space-y-3">
             <CheckCircle2 size={36} className="text-emerald-400" />
             <div>
-              <p className="text-xs font-semibold text-zinc-200 font-mono">Sistema Atualizado</p>
-              <p className="text-[11px] text-zinc-500 font-mono mt-0.5">Você está na versão mais recente ({CURRENT_VERSION}).</p>
+              <p className="text-xs font-semibold text-zinc-200 font-mono">Ambiente Atualizado</p>
+              <p className="text-[11px] text-zinc-500 font-mono mt-0.5">
+                Você já está rodando a compilação mais estável ({CURRENT_VERSION}).
+              </p>
             </div>
             <button
               onClick={onCheckAgain}
               className="mt-1 text-xs font-mono text-zinc-400 hover:text-white bg-[#141924] border border-[#22293b] px-3 py-1.5 rounded-lg transition cursor-pointer"
             >
-              Checar Novamente
+              Verificar Novamente
             </button>
           </div>
         )}

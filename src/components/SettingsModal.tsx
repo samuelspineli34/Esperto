@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { listen } from '@tauri-apps/api/event';
+import { detectHardware, HardwareAuditResult } from '../services/hardware';
 import {
   X,
   Sliders,
@@ -66,6 +67,7 @@ export const SettingsModal: React.FC<Props> = ({
   const [isOllamaGuideOpen, setIsOllamaGuideOpen] = useState(false);
   const [testingProviderId, setTestingProviderId] = useState<string | null>(null);
   const [providerStatuses, setProviderStatuses] = useState<Record<string, { ok: boolean; latency: number; error?: string }>>({});
+  const [hardwareAudit, setHardwareAudit] = useState<HardwareAuditResult | null>(null);
 
   const [localModelsList, setLocalModelsList] = useState<OllamaModelTag[]>([]);
   const [pullModelTag, setPullModelTag] = useState('');
@@ -92,8 +94,7 @@ export const SettingsModal: React.FC<Props> = ({
 
   useEffect(() => {
     if (isOpen) {
-      checkOllamaStatusQuick();
-      calculateAppStorage();
+      detectHardware().then(setHardwareAudit).catch(console.error);
     }
   }, [isOpen]);
 
@@ -368,9 +369,8 @@ export const SettingsModal: React.FC<Props> = ({
           <button
             type="button"
             onClick={() => setActiveTab('models')}
-            className={`px-3 py-1.5 rounded-lg font-medium transition cursor-pointer ${
-              activeTab === 'models' ? 'bg-[#181e2b] text-zinc-100 border border-[#2c364d]' : 'text-zinc-500 hover:text-zinc-300'
-            }`}
+            className={`px-3 py-1.5 rounded-lg font-medium transition cursor-pointer ${activeTab === 'models' ? 'bg-[#181e2b] text-zinc-100 border border-[#2c364d]' : 'text-zinc-500 hover:text-zinc-300'
+              }`}
           >
             Modelos & Servidores
           </button>
@@ -378,9 +378,8 @@ export const SettingsModal: React.FC<Props> = ({
           <button
             type="button"
             onClick={() => setActiveTab('ollama')}
-            className={`px-3 py-1.5 rounded-lg font-medium transition cursor-pointer flex items-center gap-1.5 ${
-              activeTab === 'ollama' ? 'bg-[#121f19] text-emerald-300 border border-[#1f3a2f]' : 'text-zinc-500 hover:text-zinc-300'
-            }`}
+            className={`px-3 py-1.5 rounded-lg font-medium transition cursor-pointer flex items-center gap-1.5 ${activeTab === 'ollama' ? 'bg-[#121f19] text-emerald-300 border border-[#1f3a2f]' : 'text-zinc-500 hover:text-zinc-300'
+              }`}
           >
             <Cpu size={13} className="text-emerald-400" />
             <span>Ollama & GPU</span>
@@ -389,9 +388,8 @@ export const SettingsModal: React.FC<Props> = ({
           <button
             type="button"
             onClick={() => setActiveTab('params')}
-            className={`px-3 py-1.5 rounded-lg font-medium transition cursor-pointer ${
-              activeTab === 'params' ? 'bg-[#181e2b] text-zinc-100 border border-[#2c364d]' : 'text-zinc-500 hover:text-zinc-300'
-            }`}
+            className={`px-3 py-1.5 rounded-lg font-medium transition cursor-pointer ${activeTab === 'params' ? 'bg-[#181e2b] text-zinc-100 border border-[#2c364d]' : 'text-zinc-500 hover:text-zinc-300'
+              }`}
           >
             Parâmetros
           </button>
@@ -399,9 +397,8 @@ export const SettingsModal: React.FC<Props> = ({
           <button
             type="button"
             onClick={() => setActiveTab('keys')}
-            className={`px-3 py-1.5 rounded-lg font-medium transition cursor-pointer ${
-              activeTab === 'keys' ? 'bg-[#181e2b] text-zinc-100 border border-[#2c364d]' : 'text-zinc-500 hover:text-zinc-300'
-            }`}
+            className={`px-3 py-1.5 rounded-lg font-medium transition cursor-pointer ${activeTab === 'keys' ? 'bg-[#181e2b] text-zinc-100 border border-[#2c364d]' : 'text-zinc-500 hover:text-zinc-300'
+              }`}
           >
             Chaves de Nuvem
           </button>
@@ -409,9 +406,8 @@ export const SettingsModal: React.FC<Props> = ({
           <button
             type="button"
             onClick={() => setActiveTab('memory')}
-            className={`px-3 py-1.5 rounded-lg font-medium transition cursor-pointer ${
-              activeTab === 'memory' ? 'bg-[#181e2b] text-zinc-100 border border-[#2c364d]' : 'text-zinc-500 hover:text-zinc-300'
-            }`}
+            className={`px-3 py-1.5 rounded-lg font-medium transition cursor-pointer ${activeTab === 'memory' ? 'bg-[#181e2b] text-zinc-100 border border-[#2c364d]' : 'text-zinc-500 hover:text-zinc-300'
+              }`}
           >
             Memória & Cache
           </button>
@@ -506,9 +502,8 @@ export const SettingsModal: React.FC<Props> = ({
                           </div>
 
                           {status && (
-                            <div className={`p-2 rounded text-[11px] font-mono flex items-center justify-between ${
-                              status.ok ? 'bg-emerald-950/30 text-emerald-300 border border-emerald-900/40' : 'bg-rose-950/30 text-rose-300 border border-rose-900/40'
-                            }`}>
+                            <div className={`p-2 rounded text-[11px] font-mono flex items-center justify-between ${status.ok ? 'bg-emerald-950/30 text-emerald-300 border border-emerald-900/40' : 'bg-rose-950/30 text-rose-300 border border-rose-900/40'
+                              }`}>
                               <span>{status.ok ? `Online (${status.latency}ms)` : `Erro: ${status.error}`}</span>
                               <span>{prov.models.length} modelos listados</span>
                             </div>
@@ -523,47 +518,233 @@ export const SettingsModal: React.FC<Props> = ({
           )}
 
           {activeTab === 'ollama' && (
-            <div className="space-y-4">
-              <div className="p-3.5 bg-[#0a0d13] border border-[#263044] rounded-xl space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-xs font-bold text-zinc-100">Assistente de instalação local</div>
-                  <p className="text-[11px] text-zinc-400 mt-1">Instala o Ollama pelo gerenciador oficial do Windows, inicia o serviço e verifica a GPU. Não exige comandos manuais.</p>
+            <div className="space-y-4 font-sans">
+              {/* Diagnóstico de Hardware e Recomendações Baseadas em VRAM */}
+              {hardwareAudit && (
+                <div className="p-3.5 bg-[#0a0f18] border border-indigo-950/60 rounded-xl space-y-3 font-mono">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Cpu size={16} className="text-emerald-400" />
+                      <span className="text-xs font-bold text-zinc-100 uppercase tracking-wide">
+                        Detecção de Hardware & Recomendações
+                      </span>
+                    </div>
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-indigo-950 border border-indigo-700/40 text-indigo-300 font-semibold">
+                      {hardwareAudit.tierLabel}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] text-zinc-300">
+                    <div className="bg-[#101522] p-2 rounded border border-[#1d263a]">
+                      <span className="text-[10px] text-zinc-500 block">GPU</span>
+                      <b className="truncate block" title={hardwareAudit.specs.gpu_name}>
+                        {hardwareAudit.specs.gpu_name}
+                      </b>
+                    </div>
+                    <div className="bg-[#101522] p-2 rounded border border-[#1d263a]">
+                      <span className="text-[10px] text-zinc-500 block">VRAM Dedicada</span>
+                      <b className="text-emerald-400">
+                        {(hardwareAudit.specs.gpu_vram_mb / 1024).toFixed(1)} GB
+                      </b>
+                    </div>
+                    <div className="bg-[#101522] p-2 rounded border border-[#1d263a]">
+                      <span className="text-[10px] text-zinc-500 block">RAM Total</span>
+                      <b className="text-zinc-200">
+                        {(hardwareAudit.specs.total_ram_mb / 1024).toFixed(0)} GB
+                      </b>
+                    </div>
+                    <div className="bg-[#101522] p-2 rounded border border-[#1d263a]">
+                      <span className="text-[10px] text-zinc-500 block">CPU Cores</span>
+                      <b className="text-zinc-200">{hardwareAudit.specs.cpu_cores} núcleos</b>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5 pt-1">
+                    <span className="text-[10px] text-zinc-400 uppercase tracking-wider block font-semibold">
+                      Modelos recomendados para esta GPU:
+                    </span>
+                    <div className="space-y-1.5">
+                      {hardwareAudit.recommendations.map((rec) => (
+                        <div
+                          key={rec.id}
+                          className={`p-2.5 rounded-lg border flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs ${
+                            rec.isRecommended
+                              ? 'bg-[#101a1d] border-emerald-800/40 text-zinc-200'
+                              : 'bg-[#10131d] border-[#1f2638] text-zinc-400 opacity-70'
+                          }`}
+                        >
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-zinc-100">{rec.name}</span>
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#162130] text-indigo-300 font-semibold">
+                                {rec.badge}
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-zinc-400 mt-0.5">{rec.reason}</p>
+                          </div>
+                          <span className="text-[10px] font-bold text-emerald-400 shrink-0 font-mono">
+                            Requer ~{rec.vramRequiredGb}GB VRAM
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
-                <button type="button" onClick={handleInstallOllama} disabled={installingOllama || ollamaOnline} className="shrink-0 px-3 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-[11px] disabled:opacity-40">{installingOllama ? 'Instalando...' : ollamaOnline ? 'Ollama ativo' : 'Instalar Ollama'}</button>
+              )}
+
+              {/* Assistente de Instalação e Status do Processo */}
+              <div className="p-3.5 bg-[#0a0d13] border border-[#263044] rounded-xl space-y-3 font-mono">
+                <div className="flex items-center justify-between gap-3 font-sans">
+                  <div>
+                    <div className="text-xs font-bold text-zinc-100 font-mono uppercase">
+                      Assistente de Instalação Local
+                    </div>
+                    <p className="text-[11px] text-zinc-400 mt-1 font-sans">
+                      Instala o Ollama pelo gerenciador oficial do Windows, inicia o serviço e verifica a GPU sem comandos manuais.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleInstallOllama}
+                    disabled={installingOllama || ollamaOnline}
+                    className="shrink-0 px-3 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-[11px] font-mono cursor-pointer disabled:opacity-40"
+                  >
+                    {installingOllama ? 'Instalando...' : ollamaOnline ? 'Ollama Ativo' : 'Instalar Ollama'}
+                  </button>
+                </div>
+
+                {diagnostics && (
+                  <div className="grid grid-cols-2 gap-2 text-[11px]">
+                    <div className="rounded bg-[#111722] p-2 text-zinc-300">
+                      Ollama:{' '}
+                      <b className={diagnostics.ollamaInstalled ? 'text-emerald-400' : 'text-amber-400'}>
+                        {diagnostics.ollamaInstalled ? 'instalado' : 'não encontrado'}
+                      </b>
+                    </div>
+                    <div className="rounded bg-[#111722] p-2 text-zinc-300">
+                      Serviço:{' '}
+                      <b className={diagnostics.ollamaOnline ? 'text-emerald-400' : 'text-amber-400'}>
+                        {diagnostics.ollamaOnline ? 'online' : 'offline'}
+                      </b>
+                    </div>
+                    <div className="rounded bg-[#111722] p-2 text-zinc-300 col-span-2">
+                      GPU: <b>{diagnostics.gpu || 'nvidia-smi não encontrado / GPU NVIDIA indisponível'}</b>
+                    </div>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={checkOllamaStatusQuick}
+                  className="text-[10px] text-indigo-300 hover:text-indigo-200 cursor-pointer"
+                >
+                  Atualizar diagnóstico
+                </button>
               </div>
-              {diagnostics && <div className="grid grid-cols-2 gap-2 text-[11px]">
-                <div className="rounded bg-[#111722] p-2 text-zinc-300">Ollama: <b className={diagnostics.ollamaInstalled ? 'text-emerald-400' : 'text-amber-400'}>{diagnostics.ollamaInstalled ? 'instalado' : 'não encontrado'}</b></div>
-                <div className="rounded bg-[#111722] p-2 text-zinc-300">Serviço: <b className={diagnostics.ollamaOnline ? 'text-emerald-400' : 'text-amber-400'}>{diagnostics.ollamaOnline ? 'online' : 'offline'}</b></div>
-                <div className="rounded bg-[#111722] p-2 text-zinc-300 col-span-2">GPU: <b>{diagnostics.gpu || 'nvidia-smi não encontrado / GPU NVIDIA indisponível'}</b></div>
-              </div>}
-              <button type="button" onClick={checkOllamaStatusQuick} className="text-[10px] text-indigo-300 hover:text-indigo-200">Atualizar diagnóstico</button>
-            </div>
 
-            <div className="p-3.5 bg-[#0a0d13] border border-[#3a2d1c] rounded-xl space-y-3">
-              <div><div className="text-xs font-bold text-zinc-100">Buscar e instalar GGUF pelo Hugging Face</div><p className="text-[11px] text-zinc-400 mt-1">Pesquise repositórios públicos, escolha um arquivo GGUF, baixe direto para o computador e importe no Ollama. Este fluxo importa GGUF de arquivo único; modelos privados/gated, shards divididos e projetores multimodais separados exigem configuração adicional. Para visão, prefira o botão de instalação do Qwen3-VL na seção de modelos recomendados.</p></div>
-              <div className="flex gap-2"><input value={hfQuery} onChange={e => setHfQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') void handleSearchHF(); }} placeholder="Ex.: Qwen 2.5 Coder 7B GGUF" className="flex-1 min-w-0 bg-[#121622] border border-[#293044] rounded-lg px-3 py-2 text-xs text-white"/><button type="button" onClick={handleSearchHF} disabled={hfBusy || hfQuery.trim().length < 2} className="px-3 rounded-lg bg-indigo-700 text-white text-xs disabled:opacity-40">Buscar</button></div>
-              {hfModels.length > 0 && <div className="max-h-36 overflow-y-auto space-y-1">{hfModels.map(m => <button type="button" key={m.id} onClick={() => void handleSelectHFRepo(m.id)} className={`w-full text-left p-2 rounded border text-[11px] ${hfRepo === m.id ? 'border-indigo-500 bg-indigo-950/30 text-white' : 'border-[#252d40] bg-[#111722] text-zinc-300'}`}><span className="block truncate">{m.id}</span><span className="text-[10px] text-zinc-500">{m.downloads.toLocaleString()} downloads · {m.likes} likes</span></button>)}</div>}
-              {hfRepo && <div className="space-y-2"><div className="text-[10px] text-zinc-400">Arquivos GGUF de <b className="text-zinc-200">{hfRepo}</b></div><select value={hfSelectedFile} onChange={e => setHfSelectedFile(e.target.value)} className="w-full bg-[#121622] border border-[#293044] rounded-lg px-3 py-2 text-xs text-white"><option value="">Selecione um arquivo GGUF...</option>{hfFiles.map(f => <option key={f.path} value={f.path}>{f.path} · {formatBytes(f.size)}</option>)}</select><button type="button" onClick={handleDownloadHF} disabled={hfBusy || !hfSelectedFile || !ollamaOnline} className="w-full py-2 rounded-lg bg-emerald-700 text-white text-xs disabled:opacity-40">{hfBusy ? `Baixando/importando ${hfProgress}%` : 'Baixar e importar no Ollama'}</button>{hfBusy && <div className="h-1.5 rounded bg-[#1a2030] overflow-hidden"><div className="h-full bg-emerald-400" style={{width:`${hfProgress}%`}}/></div>}</div>}
-            </div>
+              {/* Hugging Face GGUF Downloader */}
+              <div className="p-3.5 bg-[#0a0d13] border border-[#3a2d1c] rounded-xl space-y-3 font-sans">
+                <div>
+                  <div className="text-xs font-bold text-zinc-100 font-mono uppercase">
+                    Buscar e Instalar GGUF pelo Hugging Face
+                  </div>
+                  <p className="text-[11px] text-zinc-400 mt-1 leading-relaxed">
+                    Pesquise repositórios públicos, escolha um arquivo GGUF, baixe direto para a máquina e importe no Ollama.
+                  </p>
+                </div>
+                <div className="flex gap-2 font-mono">
+                  <input
+                    value={hfQuery}
+                    onChange={(e) => setHfQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') void handleSearchHF();
+                    }}
+                    placeholder="Ex.: Qwen 2.5 Coder 7B GGUF"
+                    className="flex-1 min-w-0 bg-[#121622] border border-[#293044] rounded-lg px-3 py-2 text-xs text-white focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSearchHF}
+                    disabled={hfBusy || hfQuery.trim().length < 2}
+                    className="px-3 rounded-lg bg-indigo-700 hover:bg-indigo-600 text-white text-xs cursor-pointer disabled:opacity-40"
+                  >
+                    Buscar
+                  </button>
+                </div>
 
-            <div className="p-3.5 bg-[#0a0f16] border border-[#1b2f26] rounded-xl space-y-2">
+                {hfModels.length > 0 && (
+                  <div className="max-h-36 overflow-y-auto space-y-1 font-mono">
+                    {hfModels.map((m) => (
+                      <button
+                        type="button"
+                        key={m.id}
+                        onClick={() => void handleSelectHFRepo(m.id)}
+                        className={`w-full text-left p-2 rounded border text-[11px] cursor-pointer ${
+                          hfRepo === m.id
+                            ? 'border-indigo-500 bg-indigo-950/30 text-white'
+                            : 'border-[#252d40] bg-[#111722] text-zinc-300'
+                        }`}
+                      >
+                        <span className="block truncate">{m.id}</span>
+                        <span className="text-[10px] text-zinc-500">
+                          {m.downloads.toLocaleString()} downloads · {m.likes} likes
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {hfRepo && (
+                  <div className="space-y-2 font-mono">
+                    <div className="text-[10px] text-zinc-400">
+                      Arquivos GGUF de <b className="text-zinc-200">{hfRepo}</b>
+                    </div>
+                    <select
+                      value={hfSelectedFile}
+                      onChange={(e) => setHfSelectedFile(e.target.value)}
+                      className="w-full bg-[#121622] border border-[#293044] rounded-lg px-3 py-2 text-xs text-white focus:outline-none"
+                    >
+                      <option value="">Selecione um arquivo GGUF...</option>
+                      {hfFiles.map((f) => (
+                        <option key={f.path} value={f.path}>
+                          {f.path} · {formatBytes(f.size)}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={handleDownloadHF}
+                      disabled={hfBusy || !hfSelectedFile || !ollamaOnline}
+                      className="w-full py-2 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-xs cursor-pointer disabled:opacity-40"
+                    >
+                      {hfBusy ? `Baixando/importando ${hfProgress}%` : 'Baixar e importar no Ollama'}
+                    </button>
+                    {hfBusy && (
+                      <div className="h-1.5 rounded bg-[#1a2030] overflow-hidden">
+                        <div className="h-full bg-emerald-400" style={{ width: `${hfProgress}%` }} />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Janela de Contexto */}
+              <div className="p-3.5 bg-[#0a0f16] border border-[#1b2f26] rounded-xl space-y-2 font-mono">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Maximize2 size={15} className="text-emerald-400" />
-                    <span className="text-xs font-semibold text-emerald-200 font-mono">
+                    <span className="text-xs font-semibold text-emerald-200 uppercase">
                       Janela de Contexto Base (Tokens)
                     </span>
                   </div>
-                  <span className="text-xs font-mono text-emerald-300 font-bold">
+                  <span className="text-xs text-emerald-300 font-bold">
                     {form.ollamaContextLength || 4096} tokens
                   </span>
                 </div>
-                <p className="text-[11px] text-zinc-400">
-                  Controla a memória de contexto. Para a RTX 2060 Super de 8 GB, comece em 4k; 8k pode exigir offload parcial para a RAM dependendo do modelo.
+                <p className="text-[11px] text-zinc-400 font-sans">
+                  Controla a alocação de VRAM. Para GPUs de 8 GB (como RTX 2060S / 3060 / 4060), mantenha em 4k; valores maiores (8k+) podem exigir offload para a memória RAM dependendo do tamanho do modelo.
                 </p>
 
-                <div className="flex gap-2 pt-1 font-mono text-xs">
+                <div className="flex gap-2 pt-1 text-xs">
                   {[4096, 8192, 16384].map((tokens) => (
                     <button
                       key={tokens}
@@ -581,13 +762,14 @@ export const SettingsModal: React.FC<Props> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {/* Status do Motor e Armazenamento Ocupado */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 font-mono">
                 <div className="p-3 bg-[#0a0d13] border border-[#1c2232] rounded-xl flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Cpu size={16} className="text-emerald-400" />
                     <div>
-                      <span className="text-xs font-bold text-zinc-200 block font-mono">Motor Local</span>
-                      <span className="text-[11px] font-mono text-zinc-400">
+                      <span className="text-xs font-bold text-zinc-200 block">Motor Local</span>
+                      <span className="text-[11px] text-zinc-400">
                         {ollamaOnline ? 'Online (Pronto)' : 'Offline'}
                       </span>
                     </div>
@@ -607,7 +789,7 @@ export const SettingsModal: React.FC<Props> = ({
                       type="button"
                       onClick={checkOllamaStatusQuick}
                       disabled={checkingOllama}
-                      className="bg-[#161a25] text-zinc-300 border border-[#242b3d] text-xs px-2.5 py-1 rounded transition"
+                      className="bg-[#161a25] text-zinc-300 border border-[#242b3d] text-xs px-2.5 py-1 rounded transition cursor-pointer"
                     >
                       <RefreshCw size={11} className={checkingOllama ? 'animate-spin' : ''} />
                     </button>
@@ -618,8 +800,8 @@ export const SettingsModal: React.FC<Props> = ({
                   <div className="flex items-center gap-2">
                     <HardDrive size={16} className="text-indigo-400" />
                     <div>
-                      <span className="text-xs font-bold text-zinc-200 block font-mono">Espaço Ocupado</span>
-                      <span className="text-[11px] font-mono text-zinc-400">
+                      <span className="text-xs font-bold text-zinc-200 block">Espaço Ocupado</span>
+                      <span className="text-[11px] text-zinc-400">
                         {localModelsList.length} modelos • {formatBytes(totalOllamaStorageBytes)}
                       </span>
                     </div>
@@ -627,13 +809,14 @@ export const SettingsModal: React.FC<Props> = ({
                 </div>
               </div>
 
-              <div className="p-3.5 bg-[#0a0d13] border border-[#1c2232] rounded-xl space-y-2.5">
-                <div className="flex items-center gap-2">
+              {/* Pesquisa Web Local */}
+              <div className="p-3.5 bg-[#0a0d13] border border-[#1c2232] rounded-xl space-y-2.5 font-sans">
+                <div className="flex items-center gap-2 font-mono">
                   <Globe size={14} className="text-sky-400" />
-                  <span className="text-xs font-bold text-zinc-200 font-mono">Pesquisa na Web para modelos locais</span>
+                  <span className="text-xs font-bold text-zinc-200">Pesquisa na Web para Modelos Locais</span>
                 </div>
-                <p className="text-[11px] text-zinc-400">
-                  SearXNG é opcional. Se não houver uma instância configurada/ativa, o Esperto tenta usar DuckDuckGo automaticamente como alternativa, sem Docker Desktop. As consultas de busca saem para a internet; o modelo e o histórico permanecem locais.
+                <p className="text-[11px] text-zinc-400 leading-relaxed">
+                  O SearXNG é opcional. Se não houver uma instância configurada ou ativa, o Esperto utiliza DuckDuckGo como alternativa automática sem requerer Docker Desktop.
                 </p>
                 <label className="block text-[11px] text-zinc-400 font-mono">URL do SearXNG</label>
                 <input
@@ -643,47 +826,59 @@ export const SettingsModal: React.FC<Props> = ({
                   placeholder="http://127.0.0.1:8080"
                   className="w-full bg-[#121622] border border-[#21293a] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none"
                 />
-                <p className="text-[10px] text-zinc-500">
-                  O serviço precisa aceitar respostas JSON em /search?format=json. Consulte infra/searxng e o README para instalação.
-                </p>
               </div>
 
-              <div className="p-3.5 bg-[#0a0d13] border border-[#1c2232] rounded-xl space-y-2.5">
-                <span className="text-xs font-bold text-zinc-200 flex items-center gap-1.5 font-mono">
+              {/* Perfis Recomendados */}
+              <div className="p-3.5 bg-[#0a0d13] border border-[#1c2232] rounded-xl space-y-2.5 font-mono">
+                <span className="text-xs font-bold text-zinc-200 flex items-center gap-1.5 uppercase">
                   <Download size={13} className="text-emerald-400" />
-                  <span>Perfis recomendados para RTX 2060 Super 8 GB</span>
+                  <span>Atalhos Rápidos de Instalação</span>
                 </span>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 font-sans">
                   <div className="p-2.5 bg-[#101722] border border-[#1f3440] rounded-lg space-y-2">
-                    <div className="text-xs text-zinc-100 font-semibold">Qwen3-VL 4B</div>
-                    <p className="text-[10px] text-zinc-400">Modelo principal multimodal: texto, imagens e análise de screenshots.</p>
-                    <button type="button" onClick={() => handlePullModel('qwen3-vl:4b')} disabled={isPulling} className="w-full bg-emerald-700 hover:bg-emerald-600 text-white text-[11px] py-1.5 rounded disabled:opacity-40">Baixar qwen3-vl:4b</button>
+                    <div className="text-xs text-zinc-100 font-semibold font-mono">Qwen3-VL 4B</div>
+                    <p className="text-[10px] text-zinc-400">Modelo multimodal com suporte a texto, imagens e screenshots.</p>
+                    <button
+                      type="button"
+                      onClick={() => handlePullModel('qwen3-vl:4b')}
+                      disabled={isPulling}
+                      className="w-full bg-emerald-700 hover:bg-emerald-600 text-white text-[11px] font-mono py-1.5 rounded cursor-pointer disabled:opacity-40"
+                    >
+                      Baixar qwen3-vl:4b
+                    </button>
                   </div>
                   <div className="p-2.5 bg-[#101722] border border-[#28314a] rounded-lg space-y-2">
-                    <div className="text-xs text-zinc-100 font-semibold">Qwen2.5-Coder 7B</div>
-                    <p className="text-[10px] text-zinc-400">Especialista textual em programação; não recebe imagens.</p>
-                    <button type="button" onClick={() => handlePullModel('qwen2.5-coder:7b')} disabled={isPulling} className="w-full bg-indigo-700 hover:bg-indigo-600 text-white text-[11px] py-1.5 rounded disabled:opacity-40">Baixar qwen2.5-coder:7b</button>
+                    <div className="text-xs text-zinc-100 font-semibold font-mono">Qwen2.5-Coder 7B</div>
+                    <p className="text-[10px] text-zinc-400">Especialista textual em código e geração autônoma de arquivos.</p>
+                    <button
+                      type="button"
+                      onClick={() => handlePullModel('qwen2.5-coder:7b')}
+                      disabled={isPulling}
+                      className="w-full bg-indigo-700 hover:bg-indigo-600 text-white text-[11px] font-mono py-1.5 rounded cursor-pointer disabled:opacity-40"
+                    >
+                      Baixar qwen2.5-coder:7b
+                    </button>
                   </div>
                 </div>
-                <p className="text-[10px] text-zinc-500">Use apenas um modelo por vez. Os pesos Q4 do Qwen3-VL 4B ocupam cerca de 3,3 GB, além do projetor visual, cache e contexto.</p>
               </div>
 
-              <div className="p-3.5 bg-[#0a0d13] border border-[#1c2232] rounded-xl space-y-2.5">
-                <span className="text-xs font-bold text-zinc-200 flex items-center gap-1.5 font-mono">
+              {/* Download Customizado por Identificador */}
+              <div className="p-3.5 bg-[#0a0d13] border border-[#1c2232] rounded-xl space-y-2.5 font-sans">
+                <span className="text-xs font-bold text-zinc-200 flex items-center gap-1.5 font-mono uppercase">
                   <Download size={13} className="text-indigo-400" />
-                  <span>Baixar Modelo do Hugging Face ou Ollama</span>
+                  <span>Baixar Modelo do Hugging Face ou Ollama Library</span>
                 </span>
                 <p className="text-[11px] text-zinc-400">
-                  Cole o identificador de um modelo do Ollama (ex.: <code>qwen3-vl:4b</code>) ou o repositório GGUF compatível do Hugging Face:
+                  Informe o identificador do modelo (ex.: <code>qwen3-vl:4b</code>) ou o link direto:
                 </p>
 
-                <div className="flex gap-2">
+                <div className="flex gap-2 font-mono">
                   <input
                     type="text"
                     value={pullModelTag}
                     onChange={(e) => setPullModelTag(e.target.value)}
                     placeholder="Cole autor/modelo..."
-                    className="flex-1 bg-[#121622] border border-[#21293a] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none"
+                    className="flex-1 bg-[#121622] border border-[#21293a] rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none"
                   />
                   <button
                     type="button"
@@ -708,22 +903,23 @@ export const SettingsModal: React.FC<Props> = ({
                 )}
               </div>
 
-              <div className="p-3.5 bg-[#0a0d13] border border-[#1c2232] rounded-xl space-y-2">
+              {/* Lista de Modelos Instalados */}
+              <div className="p-3.5 bg-[#0a0d13] border border-[#1c2232] rounded-xl space-y-2 font-mono">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-zinc-200 font-mono">Modelos Instalados</span>
-                  <span className="text-[11px] font-mono text-zinc-400">{formatBytes(totalOllamaStorageBytes)} total</span>
+                  <span className="text-xs font-bold text-zinc-200 uppercase">Modelos Locais Instalados</span>
+                  <span className="text-[11px] text-zinc-400">{formatBytes(totalOllamaStorageBytes)} total</span>
                 </div>
 
                 <div className="space-y-1 max-h-40 overflow-y-auto">
                   {localModelsList.map((m) => (
-                    <div key={m.name} className="flex items-center justify-between p-2 bg-[#121622] border border-[#1d2332] rounded-lg text-xs font-mono">
+                    <div key={m.name} className="flex items-center justify-between p-2 bg-[#121622] border border-[#1d2332] rounded-lg text-xs">
                       <span className="text-zinc-300 truncate max-w-sm">{m.name}</span>
                       <div className="flex items-center gap-2.5">
                         <span className="text-[11px] text-zinc-400">{formatBytes(m.size)}</span>
                         <button
                           type="button"
                           onClick={() => handleDeleteModel(m.name)}
-                          className="text-zinc-600 hover:text-rose-400 p-0.5 transition"
+                          className="text-zinc-600 hover:text-rose-400 p-0.5 transition cursor-pointer"
                           title="Excluir do disco"
                         >
                           <Trash2 size={12} />
@@ -749,7 +945,7 @@ export const SettingsModal: React.FC<Props> = ({
                 step="0.05"
                 value={form.temperature ?? 0.7}
                 onChange={(e) => setForm((prev) => ({ ...prev, temperature: parseFloat(e.target.value) }))}
-                className="w-full accent-indigo-500"
+                className="w-full accent-indigo-500 cursor-pointer"
               />
 
               <div className="pt-2 flex items-center justify-between bg-[#121622] p-2.5 rounded-lg border border-[#1d2332]">
@@ -780,7 +976,6 @@ export const SettingsModal: React.FC<Props> = ({
                 />
               </div>
 
-              {/* CAMPO DE HUGGING FACE TOKEN ADICIONADO */}
               <div className="p-3 bg-[#0a0d14] border border-amber-950/40 rounded-xl">
                 <label className="block text-xs font-semibold text-zinc-300 mb-1">Hugging Face Token</label>
                 <input
@@ -819,7 +1014,7 @@ export const SettingsModal: React.FC<Props> = ({
           )}
 
           {activeTab === 'memory' && (
-            <div className="space-y-3">
+            <div className="space-y-3 font-sans">
               <div className="p-3.5 bg-[#0a0d13] border border-[#1c2232] rounded-xl space-y-2">
                 <span className="text-xs font-bold text-zinc-300 block font-mono">Memória Permanente</span>
                 <textarea
@@ -827,14 +1022,14 @@ export const SettingsModal: React.FC<Props> = ({
                   onChange={(e) => setForm((prev) => ({ ...prev, globalMemory: e.target.value }))}
                   placeholder="Instruções permanentes de arquitetura para todas as IAs..."
                   rows={5}
-                  className="w-full bg-[#121622] border border-[#21293a] rounded p-2 text-xs text-white font-mono focus:outline-none resize-none"
+                  className="w-full bg-[#121622] border border-[#21293a] rounded p-2 text-xs text-white font-mono focus:outline-none resize-none leading-relaxed"
                 />
               </div>
 
-              <div className="p-3 bg-[#0a0d13] border border-[#1c2232] rounded-xl flex items-center justify-between">
+              <div className="p-3 bg-[#0a0d13] border border-[#1c2232] rounded-xl flex items-center justify-between font-mono">
                 <div>
-                  <span className="text-xs font-bold text-zinc-300 block">Banco de Dados Interno</span>
-                  <span className="text-[11px] font-mono text-zinc-500">Uso atual: {appCacheSize}</span>
+                  <span className="text-xs font-bold text-zinc-300 block font-sans">Banco de Dados Interno</span>
+                  <span className="text-[11px] text-zinc-500">Uso atual: {appCacheSize}</span>
                 </div>
                 <button
                   type="button"
@@ -846,7 +1041,7 @@ export const SettingsModal: React.FC<Props> = ({
                       window.location.reload();
                     }
                   }}
-                  className="bg-[#181d2a] hover:bg-rose-950/60 text-zinc-300 hover:text-rose-300 text-xs px-3 py-1 rounded transition"
+                  className="bg-[#181d2a] hover:bg-rose-950/60 text-zinc-300 hover:text-rose-300 text-xs px-3 py-1 rounded transition cursor-pointer"
                 >
                   Limpar Histórico
                 </button>

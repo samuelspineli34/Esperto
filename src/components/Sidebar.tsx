@@ -13,6 +13,7 @@ import {
   HelpCircle,
   ExternalLink,
   ChevronRight,
+  Sparkles,
 } from 'lucide-react';
 import { Chat } from '../lib/db';
 import { CURRENT_VERSION } from '../services/updater';
@@ -20,7 +21,9 @@ import { CURRENT_VERSION } from '../services/updater';
 interface Props {
   chats: Chat[];
   activeChatId: string | null;
+  activeView: 'chat' | 'image-studio';
   onSelectChat: (id: string) => void;
+  onSelectView: (view: 'chat' | 'image-studio') => void;
   onNewChat: () => void;
   onDuplicateChat: (id: string, e: React.MouseEvent) => void;
   onRenameChat: (id: string, newTitle: string) => void;
@@ -33,7 +36,9 @@ interface Props {
 export const Sidebar: React.FC<Props> = ({
   chats,
   activeChatId,
+  activeView,
   onSelectChat,
+  onSelectView,
   onNewChat,
   onDuplicateChat,
   onRenameChat,
@@ -77,25 +82,33 @@ export const Sidebar: React.FC<Props> = ({
         <div className="flex items-center gap-0.5">
           <button
             onClick={onOpenHelp}
-            title="Atalhos e Documentação"
-            className="text-zinc-500 hover:text-zinc-200 transition p-1.5 rounded-md hover:bg-[#161a25]"
+            title="Atalhos e Guias"
+            className="text-zinc-500 hover:text-zinc-200 transition p-1.5 rounded-md hover:bg-[#161a25] cursor-pointer"
           >
             <HelpCircle size={14} />
           </button>
           <button
             onClick={onCheckUpdate}
             title="Checar Versão"
-            className="text-zinc-500 hover:text-zinc-200 transition p-1.5 rounded-md hover:bg-[#161a25]"
+            className="text-zinc-500 hover:text-zinc-200 transition p-1.5 rounded-md hover:bg-[#161a25] cursor-pointer"
           >
             <RefreshCw size={13} />
           </button>
         </div>
       </div>
 
-      <div className="p-2.5">
+      {/* Botões de Ação Rápida: Nova Sessão & Image Studio */}
+      <div className="p-2.5 space-y-1.5">
         <button
-          onClick={onNewChat}
-          className="w-full flex items-center justify-between bg-[#151923] hover:bg-[#1b202e] text-zinc-200 hover:text-white border border-[#232a3d] hover:border-[#2f3852] font-medium py-1.5 px-3 rounded-lg transition text-xs shadow-sm cursor-pointer group"
+          onClick={() => {
+            onSelectView('chat');
+            onNewChat();
+          }}
+          className={`w-full flex items-center justify-between border font-medium py-1.5 px-3 rounded-lg transition text-xs shadow-sm cursor-pointer group ${
+            activeView === 'chat'
+              ? 'bg-[#151923] hover:bg-[#1b202e] text-zinc-200 border-[#232a3d]'
+              : 'bg-[#0f121a] hover:bg-[#141824] text-zinc-400 border-transparent'
+          }`}
         >
           <div className="flex items-center gap-2">
             <Plus size={14} className="text-zinc-400 group-hover:text-zinc-200" />
@@ -104,6 +117,23 @@ export const Sidebar: React.FC<Props> = ({
           <kbd className="text-[10px] font-mono text-zinc-500 bg-[#0e1118] px-1.5 py-0.5 rounded border border-[#202738]">
             ⌘N
           </kbd>
+        </button>
+
+        <button
+          onClick={() => onSelectView('image-studio')}
+          className={`w-full flex items-center justify-between border font-medium py-1.5 px-3 rounded-lg transition text-xs shadow-sm cursor-pointer ${
+            activeView === 'image-studio'
+              ? 'bg-purple-950/70 border-purple-500/60 text-purple-200'
+              : 'bg-[#11131c] hover:bg-[#161924] text-zinc-400 hover:text-purple-300 border-[#222538]'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <Sparkles size={14} className={activeView === 'image-studio' ? 'text-purple-400' : 'text-zinc-500'} />
+            <span className="font-mono">Image Studio</span>
+          </div>
+          <span className="text-[9px] font-mono uppercase bg-purple-900/40 text-purple-300 px-1 rounded border border-purple-800/40">
+            FLUX.2
+          </span>
         </button>
       </div>
 
@@ -116,9 +146,12 @@ export const Sidebar: React.FC<Props> = ({
         {chats.map((chat) => (
           <div
             key={chat.id}
-            onClick={() => onSelectChat(chat.id)}
+            onClick={() => {
+              onSelectView('chat');
+              onSelectChat(chat.id);
+            }}
             className={`flex items-center justify-between px-2.5 py-2 rounded-lg transition text-xs group cursor-pointer ${
-              activeChatId === chat.id
+              activeChatId === chat.id && activeView === 'chat'
                 ? 'bg-[#181d2a] text-zinc-100 border border-[#283248] shadow-xs'
                 : 'text-zinc-400 hover:bg-[#121620] hover:text-zinc-200 border border-transparent'
             }`}
@@ -135,11 +168,11 @@ export const Sidebar: React.FC<Props> = ({
                 />
                 <button
                   onClick={(e) => handleSaveRename(chat.id, e)}
-                  className="text-emerald-400 hover:text-emerald-300 p-0.5"
+                  className="text-emerald-400 hover:text-emerald-300 p-0.5 cursor-pointer"
                 >
                   <Check size={13} />
                 </button>
-                <button onClick={() => setEditingId(null)} className="text-zinc-400 hover:text-red-400 p-0.5">
+                <button onClick={() => setEditingId(null)} className="text-zinc-400 hover:text-red-400 p-0.5 cursor-pointer">
                   <X size={13} />
                 </button>
               </div>
@@ -148,7 +181,7 @@ export const Sidebar: React.FC<Props> = ({
                 <div className="flex items-center gap-2 truncate">
                   <MessageSquare
                     size={13}
-                    className={activeChatId === chat.id ? 'text-indigo-400 shrink-0' : 'text-zinc-500 shrink-0'}
+                    className={activeChatId === chat.id && activeView === 'chat' ? 'text-indigo-400 shrink-0' : 'text-zinc-500 shrink-0'}
                   />
                   <span className="truncate">{chat.title}</span>
                 </div>
@@ -157,21 +190,21 @@ export const Sidebar: React.FC<Props> = ({
                   <button
                     title="Renomear"
                     onClick={(e) => handleStartRename(chat, e)}
-                    className="p-1 text-zinc-500 hover:text-zinc-200 transition"
+                    className="p-1 text-zinc-500 hover:text-zinc-200 transition cursor-pointer"
                   >
                     <Pencil size={11} />
                   </button>
                   <button
                     title="Duplicar Sessão"
                     onClick={(e) => onDuplicateChat(chat.id, e)}
-                    className="p-1 text-zinc-500 hover:text-zinc-200 transition"
+                    className="p-1 text-zinc-500 hover:text-zinc-200 transition cursor-pointer"
                   >
                     <Copy size={11} />
                   </button>
                   <button
                     title="Remover"
                     onClick={(e) => onDeleteChat(chat.id, e)}
-                    className="p-1 text-zinc-500 hover:text-rose-400 transition"
+                    className="p-1 text-zinc-500 hover:text-rose-400 transition cursor-pointer"
                   >
                     <Trash2 size={11} />
                   </button>

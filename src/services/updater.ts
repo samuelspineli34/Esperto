@@ -1,3 +1,5 @@
+import { check } from '@tauri-apps/plugin-updater';
+
 export interface ReleaseInfo {
   version: string;
   tagName: string;
@@ -7,6 +9,7 @@ export interface ReleaseInfo {
   htmlUrl: string;
   downloadUrl?: string;
   hasUpdate: boolean;
+  installerSizeMb?: number;
 }
 
 export const CURRENT_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'v0.1.0';
@@ -28,10 +31,27 @@ function isNewerVersion(latest: string, current: string): boolean {
 
 export async function checkForUpdates(): Promise<ReleaseInfo | null> {
   try {
+    // 1. Tenta checar com o plugin oficial do Tauri
+    try {
+      const update = await check();
+      if (update) {
+        return {
+          version: update.version,
+          tagName: `v${update.version}`,
+          name: `Esperto v${update.version}`,
+          body: update.body || 'Atualização oficial de estabilidade e novas ferramentas.',
+          publishedAt: new Date().toLocaleDateString('pt-BR'),
+          htmlUrl: `https://github.com/${REPO_OWNER}/${REPO_NAME}/releases`,
+          hasUpdate: true,
+        };
+      }
+    } catch (_) {
+      // Fallback para GitHub API direta
+    }
+
+    // 2. Consulta a API do GitHub Releases
     const res = await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest`, {
-      headers: {
-        Accept: 'application/vnd.github.v3+json',
-      },
+      headers: { Accept: 'application/vnd.github.v3+json' },
     });
 
     if (!res.ok) {
@@ -43,23 +63,26 @@ export async function checkForUpdates(): Promise<ReleaseInfo | null> {
     const latestTag = data.tag_name || data.name || '';
     const hasUpdate = isNewerVersion(latestTag, CURRENT_VERSION);
 
-    // Procura por um arquivo .exe ou instalador nos assets do release
     const assets = data.assets || [];
-    const installerAsset = assets.find((a: any) => a.name.endsWith('.exe') || a.name.endsWith('.msi') || a.name.endsWith('.zip'));
+    const installerAsset = assets.find((a: any) =>
+      a.name.endsWith('.exe') || a.name.endsWith('.msi') || a.name.endsWith('.zip')
+    );
     const downloadUrl = installerAsset ? installerAsset.browser_download_url : data.html_url;
+    const installerSizeMb = installerAsset ? Math.round(installerAsset.size / (1024 * 1024)) : undefined;
 
     return {
       version: latestTag.replace(/^v/, ''),
       tagName: latestTag,
       name: data.name || latestTag,
-      body: data.body || 'Melhorias de desempenho e correções.',
+      body: data.body || 'Melhorias de desempenho, motor local e novas capacidades de imagem.',
       publishedAt: new Date(data.published_at).toLocaleDateString('pt-BR'),
       htmlUrl: data.html_url,
       downloadUrl,
       hasUpdate,
+      installerSizeMb,
     };
-  } catch (err: any) {
-    console.warn('Erro ao checar atualizações no GitHub:', err);
+  } catch (err) {
+    console.warn('Erro ao checar atualizações:', err);
     return null;
   }
 }

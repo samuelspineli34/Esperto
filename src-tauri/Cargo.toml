@@ -17,8 +17,9 @@ tauri = { version = "2.11.3", features = [] }
 tauri-plugin-log = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
-# Adicionados para download de mídia e IO
-reqwest = { version = "0.12", features = ["json", "blocking", "multipart"] }
+reqwest = { version = "0.12", features = ["json", "multipart", "stream"] }
 base64 = "0.22"
 serde_json = "1.0"
 regex = "1.11"
+tokio = { version = "1", features = ["full"] }
+futures-util = "0.3"
