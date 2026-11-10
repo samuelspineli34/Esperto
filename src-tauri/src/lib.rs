@@ -31,17 +31,37 @@ pub struct LoadedFileItem {
     pub content: String,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct TerminalExecutionResult {
+    pub output: String,
+    pub exit_code: i32,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct LocalAIDiagnostics {
+    pub platform: String,
+    pub ollama_installed: bool,
+    pub ollama_path: Option<String>,
+    pub gpu: Option<String>,
+    pub gpu_available: bool,
+    pub ollama_online: bool,
+}
+
+// ==========================================
+// 1. HARDWARE & DIAGNÓSTICO
+// ==========================================
+
 #[tauri::command]
-pub async fn get_system_specs() -> Result<SystemHardwareInfo, String> {
+async fn get_system_specs() -> Result<SystemHardwareInfo, String> {
     let mut info = SystemHardwareInfo {
         os_name: std::env::consts::OS.to_string(),
-        os_version: "Desconhecida".to_string(),
+        os_version: "10/11".to_string(),
         total_ram_mb: 16384,
         available_ram_mb: 8192,
         cpu_cores: std::thread::available_parallelism()
             .map(|p| p.get())
             .unwrap_or(8),
-        cpu_brand: "Processador x86_64 / ARM".to_string(),
+        cpu_brand: "Processador x86_64".to_string(),
         gpu_name: "GPU Integrada / Não Detectada".to_string(),
         gpu_vram_mb: 4096,
         has_nvidia_gpu: false,
@@ -52,7 +72,7 @@ pub async fn get_system_specs() -> Result<SystemHardwareInfo, String> {
 
     #[cfg(target_os = "windows")]
     {
-        // 1. Detecção da GPU NVIDIA via nvidia-smi
+        // Detecção NVIDIA via nvidia-smi
         if let Ok(output) = Command::new("nvidia-smi")
             .args([
                 "--query-gpu=gpu_name,memory.total",
@@ -75,7 +95,7 @@ pub async fn get_system_specs() -> Result<SystemHardwareInfo, String> {
             }
         }
 
-        // 2. Detecção de Memória RAM total no Windows
+        // Memória RAM Total via PowerShell
         if let Ok(output) = Command::new("powershell")
             .args([
                 "-NoProfile",
@@ -92,7 +112,7 @@ pub async fn get_system_specs() -> Result<SystemHardwareInfo, String> {
             }
         }
 
-        // 3. Nome do processador
+        // Nome da CPU
         if let Ok(output) = Command::new("powershell")
             .args([
                 "-NoProfile",
@@ -139,7 +159,56 @@ pub async fn get_system_specs() -> Result<SystemHardwareInfo, String> {
 }
 
 #[tauri::command]
-pub async fn check_comfyui_status(host: Option<String>) -> Result<ComfyCheckResult, String> {
+async fn diagnose_local_ai() -> Result<String, String> {
+    let mut installed = false;
+    let mut online = false;
+    let mut gpu_name: Option<String> = None;
+
+    if Command::new("ollama").arg("--version").output().is_ok() {
+        installed = true;
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_millis(1500))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    if let Ok(res) = client.get("http://127.0.0.1:11434/api/tags").send().await {
+        if res.status().is_success() {
+            online = true;
+        }
+    }
+
+    if let Ok(output) = Command::new("nvidia-smi")
+        .args(["--query-gpu=gpu_name", "--format=csv,noheader"])
+        .output()
+    {
+        if output.status.success() {
+            let out = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !out.is_empty() {
+                gpu_name = Some(out);
+            }
+        }
+    }
+
+    let diag = LocalAIDiagnostics {
+        platform: std::env::consts::OS.to_string(),
+        ollama_installed: installed,
+        ollama_path: None,
+        gpu: gpu_name.clone(),
+        gpu_available: gpu_name.is_some(),
+        ollama_online: online,
+    };
+
+    serde_json::to_string(&diag).map_err(|e| e.to_string())
+}
+
+// ==========================================
+// 2. COMFYUI & IMAGE STUDIO
+// ==========================================
+
+#[tauri::command]
+async fn check_comfyui_status(host: Option<String>) -> Result<ComfyCheckResult, String> {
     let target_host = host
         .unwrap_or_else(|| "http://127.0.0.1:8188".to_string())
         .trim_end_matches('/')
@@ -185,7 +254,7 @@ pub async fn check_comfyui_status(host: Option<String>) -> Result<ComfyCheckResu
 }
 
 #[tauri::command]
-pub async fn comfyui_upload_image(
+async fn comfyui_upload_image(
     host: String,
     image_base64: String,
     file_name: String,
@@ -235,7 +304,7 @@ pub async fn comfyui_upload_image(
 }
 
 #[tauri::command]
-pub async fn comfyui_get_output_image(
+async fn comfyui_get_output_image(
     host: String,
     filename: String,
     subfolder: Option<String>,
@@ -268,8 +337,12 @@ pub async fn comfyui_get_output_image(
     Ok(format!("data:image/png;base64,{}", b64))
 }
 
+// ==========================================
+// 3. ARQUIVOS & TERMINAL
+// ==========================================
+
 #[tauri::command]
-pub async fn write_file(path: String, content: String) -> Result<(), String> {
+async fn write_file(path: String, content: String) -> Result<(), String> {
     let p = Path::new(&path);
     if let Some(parent) = p.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -278,7 +351,7 @@ pub async fn write_file(path: String, content: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn read_multiple_directories(dir_paths: Vec<String>) -> Result<Vec<LoadedFileItem>, String> {
+async fn read_multiple_directories(dir_paths: Vec<String>) -> Result<Vec<LoadedFileItem>, String> {
     let mut files = Vec::new();
     for base in dir_paths {
         let p = PathBuf::from(base);
@@ -325,7 +398,7 @@ fn collect_files_recursive(dir: &Path, acc: &mut Vec<LoadedFileItem>, depth: usi
 }
 
 #[tauri::command]
-pub async fn select_folder() -> Result<Option<String>, String> {
+async fn select_folder() -> Result<Option<String>, String> {
     #[cfg(target_os = "windows")]
     {
         let ps_cmd = r#"
@@ -355,7 +428,48 @@ pub async fn select_folder() -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
-pub async fn download_and_run_installer(url: String) -> Result<String, String> {
+async fn execute_terminal_command(
+    command: String,
+    cwd: Option<String>,
+) -> Result<TerminalExecutionResult, String> {
+    #[cfg(target_os = "windows")]
+    let mut cmd = Command::new("powershell");
+    #[cfg(target_os = "windows")]
+    cmd.args(["-NoProfile", "-Command", &command]);
+
+    #[cfg(not(target_os = "windows"))]
+    let mut cmd = Command::new("sh");
+    #[cfg(not(target_os = "windows"))]
+    cmd.arg("-c").arg(&command);
+
+    if let Some(dir) = cwd {
+        if Path::new(&dir).exists() {
+            cmd.current_dir(dir);
+        }
+    }
+
+    let output = cmd.output().map_err(|e| e.to_string())?;
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    let full_output = if stderr.is_empty() {
+        stdout
+    } else {
+        format!("{}\n{}", stdout, stderr)
+    };
+
+    Ok(TerminalExecutionResult {
+        output: full_output,
+        exit_code: output.status.code().unwrap_or(-1),
+    })
+}
+
+// ==========================================
+// 4. ATUALIZADOR E UTILITÁRIOS WEB
+// ==========================================
+
+#[tauri::command]
+async fn download_and_run_installer(url: String) -> Result<String, String> {
     let client = reqwest::Client::new();
     let temp_dir = std::env::temp_dir();
     let installer_path = temp_dir.join("esperto-setup-update.exe");
@@ -391,7 +505,7 @@ pub async fn download_and_run_installer(url: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn open_url(url: String) -> Result<(), String> {
+async fn open_url(url: String) -> Result<(), String> {
     if !url.starts_with("http://") && !url.starts_with("https://") {
         return Err("Apenas protocolos HTTP/HTTPS são permitidos.".to_string());
     }
@@ -413,6 +527,10 @@ pub async fn open_url(url: String) -> Result<(), String> {
     Ok(())
 }
 
+// ==========================================
+// 5. INICIALIZAÇÃO
+// ==========================================
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::new().build())
@@ -420,12 +538,14 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             get_system_specs,
+            diagnose_local_ai,
             check_comfyui_status,
             comfyui_upload_image,
             comfyui_get_output_image,
             write_file,
             read_multiple_directories,
             select_folder,
+            execute_terminal_command,
             download_and_run_installer,
             open_url
         ])
