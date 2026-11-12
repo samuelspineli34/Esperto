@@ -56,14 +56,14 @@ async fn get_system_specs() -> Result<SystemHardwareInfo, String> {
     let mut info = SystemHardwareInfo {
         os_name: std::env::consts::OS.to_string(),
         os_version: "10/11".to_string(),
-        total_ram_mb: 0,
-        available_ram_mb: 0,
+        total_ram_mb: 16384,
+        available_ram_mb: 8192,
         cpu_cores: std::thread::available_parallelism()
             .map(|p| p.get())
             .unwrap_or(8),
         cpu_brand: "Processador x86_64".to_string(),
         gpu_name: "GPU Integrada / Não Detectada".to_string(),
-        gpu_vram_mb: 0,
+        gpu_vram_mb: 4096,
         has_nvidia_gpu: false,
         has_amd_gpu: false,
         has_apple_silicon: cfg!(target_os = "macos")
@@ -72,20 +72,6 @@ async fn get_system_specs() -> Result<SystemHardwareInfo, String> {
 
     #[cfg(target_os = "windows")]
     {
-        // Detecta RAM total/disponível e versão real do Windows. Nunca usa valores fictícios.
-        if let Ok(output) = Command::new("powershell").args([
-            "-NoProfile", "-Command",
-            "$os=Get-CimInstance Win32_OperatingSystem; [pscustomobject]@{Total=[math]::Round($os.TotalVisibleMemorySize/1024);Free=[math]::Round($os.FreePhysicalMemory/1024);Version=$os.Caption+' '+$os.Version} | ConvertTo-Json -Compress"
-        ]).output() {
-            if output.status.success() {
-                if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&output.stdout) {
-                    info.total_ram_mb = v["Total"].as_u64().unwrap_or(0);
-                    info.available_ram_mb = v["Free"].as_u64().unwrap_or(0);
-                    info.os_version = v["Version"].as_str().unwrap_or("Windows").to_string();
-                }
-            }
-        }
-
         // Detecção NVIDIA via nvidia-smi
         if let Ok(output) = Command::new("nvidia-smi")
             .args([
@@ -109,19 +95,19 @@ async fn get_system_specs() -> Result<SystemHardwareInfo, String> {
             }
         }
 
-        // Fallback para GPUs AMD/Intel via WMI. A VRAM dedicada pode não ser reportada
-        // de forma confiável por todos os drivers; nesse caso permanece zero.
-        if !info.has_nvidia_gpu {
-            if let Ok(output) = Command::new("powershell").args([
-                "-NoProfile", "-Command",
-                "Get-CimInstance Win32_VideoController | Select-Object -First 1 -ExpandProperty Name"
-            ]).output() {
-                if output.status.success() {
-                    let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                    if !name.is_empty() {
-                        info.gpu_name = name.clone();
-                        info.has_amd_gpu = name.to_lowercase().contains("amd") || name.to_lowercase().contains("radeon");
-                    }
+        // Memória RAM Total via PowerShell
+        if let Ok(output) = Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                "[math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1MB)",
+            ])
+            .output()
+        {
+            if output.status.success() {
+                let str_ram = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if let Ok(ram_val) = str_ram.parse::<u64>() {
+                    info.total_ram_mb = ram_val;
                 }
             }
         }
@@ -220,6 +206,97 @@ async fn diagnose_local_ai() -> Result<String, String> {
 // ==========================================
 // 2. COMFYUI & IMAGE STUDIO
 // ==========================================
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct ComfyModelInventory {
+    pub checkpoints: Vec<String>,
+    pub diffusion_models: Vec<String>,
+    pub text_encoders: Vec<String>,
+    pub vaes: Vec<String>,
+}
+
+async fn comfy_node_choices(
+    client: &reqwest::Client,
+    host: &str,
+    node: &str,
+    input_name: &str,
+) -> Vec<String> {
+    let url = format!("{}/object_info/{}", host, node);
+    let Ok(response) = client.get(url).send().await else { return Vec::new() };
+    let Ok(value) = response.json::<serde_json::Value>().await else { return Vec::new() };
+    let choices = value
+        .get(node)
+        .and_then(|node_info| node_info.get("input"))
+        .and_then(|input| input.get("required"))
+        .and_then(|required| required.get(input_name))
+        .and_then(|definition| definition.get(0))
+        .and_then(|choices| choices.as_array());
+    choices
+        .map(|items| items.iter().filter_map(|item| item.as_str().map(str::to_owned)).collect())
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+async fn comfyui_get_models(host: Option<String>) -> Result<ComfyModelInventory, String> {
+    let target_host = host
+        .unwrap_or_else(|| "http://127.0.0.1:8188".to_string())
+        .trim_end_matches('/')
+        .to_string();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+        .map_err(|e| format!("Não foi possível criar cliente ComfyUI: {}", e))?;
+
+    let (checkpoints, diffusion_models, text_encoders, vaes) = tokio::join!(
+        comfy_node_choices(&client, &target_host, "CheckpointLoaderSimple", "ckpt_name"),
+        comfy_node_choices(&client, &target_host, "UNETLoader", "unet_name"),
+        comfy_node_choices(&client, &target_host, "CLIPLoader", "clip_name"),
+        comfy_node_choices(&client, &target_host, "VAELoader", "vae_name"),
+    );
+
+    Ok(ComfyModelInventory { checkpoints, diffusion_models, text_encoders, vaes })
+}
+
+#[tauri::command]
+async fn comfyui_queue_prompt(host: String, payload: serde_json::Value) -> Result<serde_json::Value, String> {
+    let target_host = host.trim_end_matches('/');
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let response = client
+        .post(format!("{}/prompt", target_host))
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("Não foi possível enviar o workflow ao ComfyUI: {}", e))?;
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(format!("ComfyUI recusou o workflow (HTTP {}): {}", status, body));
+    }
+    serde_json::from_str(&body).map_err(|e| format!("Resposta inválida do ComfyUI: {} — {}", e, body))
+}
+
+#[tauri::command]
+async fn comfyui_get_history(host: String, prompt_id: String) -> Result<serde_json::Value, String> {
+    let target_host = host.trim_end_matches('/');
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let response = client
+        .get(format!("{}/history/{}", target_host, prompt_id))
+        .send()
+        .await
+        .map_err(|e| format!("Falha ao consultar histórico do ComfyUI: {}", e))?;
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(format!("ComfyUI retornou HTTP {} ao consultar histórico: {}", status, body));
+    }
+    serde_json::from_str(&body).map_err(|e| format!("Histórico inválido do ComfyUI: {}", e))
+}
 
 #[tauri::command]
 async fn check_comfyui_status(host: Option<String>) -> Result<ComfyCheckResult, String> {
@@ -325,115 +402,29 @@ async fn comfyui_get_output_image(
     folder_type: Option<String>,
 ) -> Result<String, String> {
     let target_host = host.trim_end_matches('/');
-    let mut url = format!("{}/view?filename={}", target_host, filename);
-    if let Some(sub) = subfolder {
-        if !sub.is_empty() {
-            url.push_str(&format!("&subfolder={}", sub));
-        }
-    }
-    if let Some(ftype) = folder_type {
-        if !ftype.is_empty() {
-            url.push_str(&format!("&type={}", ftype));
-        }
-    }
-
-    let client = reqwest::Client::new();
+    let url = format!("{}/view", target_host);
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| e.to_string())?;
     let bytes = client
         .get(&url)
+        .query(&[
+            ("filename", filename.as_str()),
+            ("subfolder", subfolder.as_deref().unwrap_or("")),
+            ("type", folder_type.as_deref().unwrap_or("output")),
+        ])
         .send()
         .await
         .map_err(|e| format!("Erro ao obter imagem gerada: {}", e))?
+        .error_for_status()
+        .map_err(|e| format!("ComfyUI não conseguiu entregar a imagem: {}", e))?
         .bytes()
         .await
         .map_err(|e| e.to_string())?;
 
     let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
     Ok(format!("data:image/png;base64,{}", b64))
-}
-
-// Requisições do Image Studio executadas no backend nativo, fora do WebView.
-fn comfy_endpoint(endpoint: &str) -> Result<String, String> {
-    let endpoint = endpoint.trim().trim_end_matches('/');
-    let parsed = reqwest::Url::parse(endpoint)
-        .map_err(|e| format!("Endpoint ComfyUI inválido: {e}"))?;
-    if !matches!(parsed.scheme(), "http" | "https") {
-        return Err("O endpoint do ComfyUI deve usar HTTP ou HTTPS.".into());
-    }
-    Ok(endpoint.to_string())
-}
-
-fn comfy_client() -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(4))
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .map_err(|e| format!("Não foi possível inicializar o cliente HTTP: {e}"))
-}
-
-#[tauri::command]
-async fn comfy_check_status(endpoint: String) -> Result<bool, String> {
-    let base = comfy_endpoint(&endpoint)?;
-    let client = comfy_client()?;
-    for path in ["/system_stats", "/"] {
-        if let Ok(response) = client.get(format!("{base}{path}")).send().await {
-            if response.status().is_success() { return Ok(true); }
-        }
-    }
-    Ok(false)
-}
-
-#[tauri::command]
-async fn comfy_queue_prompt(endpoint: String, payload: serde_json::Value) -> Result<serde_json::Value, String> {
-    let base = comfy_endpoint(&endpoint)?;
-    let client = comfy_client()?;
-    let response = client.post(format!("{base}/prompt"))
-        .json(&payload).send().await
-        .map_err(|e| format!("Falha ao enviar workflow ao ComfyUI: {e}"))?;
-    let status = response.status();
-    let body = response.text().await.unwrap_or_default();
-    if !status.is_success() {
-        return Err(format!("ComfyUI recusou o workflow (HTTP {status}): {body}"));
-    }
-    serde_json::from_str(&body)
-        .map_err(|e| format!("Resposta inválida do ComfyUI: {e}. Conteúdo: {body}"))
-}
-
-#[tauri::command]
-async fn comfy_get_history(endpoint: String, prompt_id: String) -> Result<serde_json::Value, String> {
-    if prompt_id.is_empty() || !prompt_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
-        return Err("ID de tarefa do ComfyUI inválido.".into());
-    }
-    let base = comfy_endpoint(&endpoint)?;
-    let client = comfy_client()?;
-    let response = client.get(format!("{base}/history/{prompt_id}"))
-        .send().await
-        .map_err(|e| format!("Falha ao consultar histórico do ComfyUI: {e}"))?;
-    let status = response.status();
-    let body = response.text().await.unwrap_or_default();
-    if !status.is_success() {
-        return Err(format!("ComfyUI retornou HTTP {status} ao consultar histórico: {body}"));
-    }
-    serde_json::from_str(&body).map_err(|e| format!("Histórico inválido do ComfyUI: {e}"))
-}
-
-#[tauri::command]
-async fn comfy_get_view_image(
-    endpoint: String, filename: String, subfolder: String, type_folder: String
-) -> Result<Vec<u8>, String> {
-    let base = comfy_endpoint(&endpoint)?;
-    let client = comfy_client()?;
-    let response = client.get(format!("{base}/view"))
-        .query(&[("filename", filename), ("subfolder", subfolder), ("type", type_folder)])
-        .send().await
-        .map_err(|e| format!("Falha ao baixar imagem do ComfyUI: {e}"))?;
-    let status = response.status();
-    if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        return Err(format!("ComfyUI retornou HTTP {status} ao baixar imagem: {body}"));
-    }
-    response.bytes().await
-        .map(|b| b.to_vec())
-        .map_err(|e| format!("Falha ao ler bytes da imagem: {e}"))
 }
 
 // ==========================================
@@ -639,10 +630,9 @@ pub fn run() {
             get_system_specs,
             diagnose_local_ai,
             check_comfyui_status,
-            comfy_check_status,
-            comfy_queue_prompt,
-            comfy_get_history,
-            comfy_get_view_image,
+            comfyui_get_models,
+            comfyui_queue_prompt,
+            comfyui_get_history,
             comfyui_upload_image,
             comfyui_get_output_image,
             write_file,

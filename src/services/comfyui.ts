@@ -6,14 +6,45 @@ export interface ComfyServerStatus {
   version: string;
 }
 
+export interface ComfyModelInventory {
+  checkpoints: string[];
+  diffusion_models: string[];
+  text_encoders: string[];
+  vaes: string[];
+}
+
+export type ComfyModelOption =
+  | {
+      id: string;
+      kind: 'checkpoint';
+      name: string;
+      label: string;
+      description: string;
+      recommendedSteps: number;
+      recommendedCfg: number;
+      samplerName: string;
+      scheduler: string;
+    }
+  | {
+      id: string;
+      kind: 'flux2';
+      name: string;
+      label: string;
+      description: string;
+      textEncoder: string;
+      vae: string;
+      recommendedSteps: number;
+    };
+
 export interface ImageEditOptions {
   host?: string;
-  model?: 'flux-2-klein' | 'flux-2-klein-distilled';
+  model: ComfyModelOption;
   prompt: string;
   negativePrompt?: string;
   referenceImageBase64?: string;
-  guidanceStrength: number; // 0.05 a 1.0 (força de orientação do prompt)
+  denoiseStrength: number;
   steps?: number;
+  cfgScale?: number;
   seed?: number;
   width?: number;
   height?: number;
@@ -22,30 +53,79 @@ export interface ImageEditOptions {
 
 export const DEFAULT_COMFY_HOST = 'http://127.0.0.1:8188';
 
-/**
- * Verifica se a instância do ComfyUI está respondendo.
- */
+const normalizeHost = (host: string = DEFAULT_COMFY_HOST) => host.trim().replace(/\/+$/, '');
+
 export async function checkComfyStatus(host: string = DEFAULT_COMFY_HOST): Promise<ComfyServerStatus> {
   try {
-    const isOnline = await invoke<boolean>('comfy_check_status', { endpoint: host });
-    return { isOnline, devices: [], version: isOnline ? 'ComfyUI conectado' : '' };
-  } catch {
+    const result = await invoke<any>('check_comfyui_status', { host: normalizeHost(host) });
     return {
-      isOnline: false,
-      devices: [],
-      version: '',
+      isOnline: Boolean(result?.is_online),
+      devices: Array.isArray(result?.devices) ? result.devices : [],
+      version: result?.version || '',
     };
+  } catch {
+    return { isOnline: false, devices: [], version: '' };
   }
 }
 
-/**
- * Constrói o grafo de nós JSON do ComfyUI otimizado para o FLUX.2 Klein 4B em Image-to-Image / Text-to-Image.
- */
-function buildFluxKleinWorkflow(opts: {
+export async function getComfyModelOptions(host: string = DEFAULT_COMFY_HOST): Promise<{
+  inventory: ComfyModelInventory;
+  options: ComfyModelOption[];
+}> {
+  const raw = await invoke<ComfyModelInventory>('comfyui_get_models', { host: normalizeHost(host) });
+  const inventory: ComfyModelInventory = {
+    checkpoints: raw?.checkpoints || [],
+    diffusion_models: raw?.diffusion_models || [],
+    text_encoders: raw?.text_encoders || [],
+    vaes: raw?.vaes || [],
+  };
+
+  const options: ComfyModelOption[] = inventory.checkpoints.map((name): ComfyModelOption => ({
+    id: `checkpoint:${name}`,
+    kind: 'checkpoint',
+    name,
+    label: name.replace(/\.safetensors$/i, ''),
+    description: /sdxl.*turbo|turbo.*sdxl/i.test(name)
+      ? 'SDXL Turbo · checkpoint · 4 passos'
+      : 'Checkpoint · modelo completo',
+    recommendedSteps: /sdxl.*turbo|turbo.*sdxl/i.test(name) ? 4 : 20,
+    recommendedCfg: /sdxl.*turbo|turbo.*sdxl/i.test(name) ? 1.5 : 3.5,
+    samplerName: /sdxl.*turbo|turbo.*sdxl/i.test(name) ? 'euler_ancestral' : 'euler',
+    scheduler: /sdxl.*turbo|turbo.*sdxl/i.test(name) ? 'sgm_uniform' : 'normal',
+  }));
+
+  // FLUX.2 Klein is loaded as a diffusion model + text encoder + VAE,
+  // not through CheckpointLoaderSimple. Only offer it when all components exist.
+  const fluxUnets = inventory.diffusion_models.filter((name) => /flux.*klein|klein.*flux/i.test(name));
+  const fluxClips = inventory.text_encoders.filter((name) => /qwen.*3.*4b|qwen_3_4b/i.test(name));
+  const fluxVaes = inventory.vaes.filter((name) => /flux2.*vae|vae.*flux2/i.test(name));
+
+  if (fluxUnets.length && fluxClips.length && fluxVaes.length) {
+    for (const name of fluxUnets) {
+      const encoder = fluxClips.find((item) => /4b/i.test(item)) || fluxClips[0];
+      const vae = fluxVaes[0];
+      options.push({
+        id: `flux2:${name}`,
+        kind: 'flux2',
+        name,
+        label: name.replace(/\.safetensors$/i, ''),
+        description: `FLUX.2 Klein · ${encoder} · ${vae}`,
+        textEncoder: encoder,
+        vae,
+        recommendedSteps: /base/i.test(name) ? 20 : 4,
+      });
+    }
+  }
+
+  return { inventory, options };
+}
+
+function buildCheckpointWorkflow(opts: {
+  model: Extract<ComfyModelOption, { kind: 'checkpoint' }>;
   uploadedImageName?: string;
-  model: 'flux-2-klein' | 'flux-2-klein-distilled';
   prompt: string;
-  negativePrompt?: string;
+  negativePrompt: string;
+  denoise: number;
   steps: number;
   cfg: number;
   seed: number;
@@ -53,249 +133,240 @@ function buildFluxKleinWorkflow(opts: {
   height: number;
 }) {
   const isImg2Img = Boolean(opts.uploadedImageName);
-  const modelFile = opts.model === 'flux-2-klein-distilled'
-    ? 'flux-2-klein-4b-fp8.safetensors'
-    : 'flux-2-klein-base-4b-fp8.safetensors';
-  const steps = opts.model === 'flux-2-klein-distilled' ? 4 : opts.steps;
-  const cfg = opts.model === 'flux-2-klein-distilled' ? 1 : opts.cfg;
-
-  const common = {
-    '9': {
-      inputs: {
-        filename_prefix: 'Esperto_FLUX2_Klein',
-        images: ['75:65', 0],
-      },
-      class_type: 'SaveImage',
+  const graph: Record<string, any> = {
+    '1': {
+      inputs: { ckpt_name: opts.model.name },
+      class_type: 'CheckpointLoaderSimple',
     },
-    '75:61': {
-      inputs: { sampler_name: 'euler' },
-      class_type: 'KSamplerSelect',
-    },
-    '75:62': {
-      inputs: {
-        height: isImg2Img ? ['75:81', 1] : opts.height,
-        steps,
-        width: isImg2Img ? ['75:81', 0] : opts.width,
-      },
-      class_type: 'Flux2Scheduler',
-    },
-    '75:63': {
-      inputs: {
-        cfg,
-        model: ['75:70', 0],
-        negative: isImg2Img ? ['75:79:76', 0] : ['75:67', 0],
-        positive: isImg2Img ? ['75:79:77', 0] : ['75:74', 0],
-      },
-      class_type: 'CFGGuider',
-    },
-    '75:64': {
-      inputs: {
-        guider: ['75:63', 0],
-        latent_image: ['75:66', 0],
-        noise: ['75:73', 0],
-        sampler: ['75:61', 0],
-        sigmas: ['75:62', 0],
-      },
-      class_type: 'SamplerCustomAdvanced',
-    },
-    '75:65': {
-      inputs: {
-        samples: ['75:64', 0],
-        vae: ['75:72', 0],
-      },
-      class_type: 'VAEDecode',
-    },
-    '75:67': {
-      inputs: {
-        clip: ['75:71', 0],
-        text: opts.negativePrompt || '',
-      },
+    '2': {
+      inputs: { text: opts.prompt, clip: ['1', 1] },
       class_type: 'CLIPTextEncode',
     },
-    '75:70': {
-      inputs: {
-        unet_name: modelFile,
-        weight_dtype: 'default',
-      },
-      class_type: 'UNETLoader',
-    },
-    '75:71': {
-      inputs: {
-        clip_name: 'qwen_3_4b.safetensors',
-        device: 'default',
-        type: 'flux2',
-      },
-      class_type: 'CLIPLoader',
-    },
-    '75:72': {
-      inputs: { vae_name: 'flux2-vae.safetensors' },
-      class_type: 'VAELoader',
-    },
-    '75:73': {
-      inputs: { noise_seed: opts.seed },
-      class_type: 'RandomNoise',
-    },
-    '75:74': {
-      inputs: {
-        clip: ['75:71', 0],
-        text: opts.prompt,
-      },
+    '3': {
+      inputs: { text: opts.negativePrompt, clip: ['1', 1] },
       class_type: 'CLIPTextEncode',
     },
-  } as Record<string, any>;
-
-  if (!isImg2Img) {
-    return {
-      ...common,
-      '75:66': {
-        inputs: {
-          batch_size: 1,
-          height: opts.height,
-          width: opts.width,
-        },
-        class_type: 'EmptyFlux2LatentImage',
+    '4': {
+      inputs: {
+        seed: opts.seed,
+        steps: opts.steps,
+        cfg: opts.cfg,
+        sampler_name: opts.model.samplerName,
+        scheduler: opts.model.scheduler,
+        denoise: isImg2Img ? opts.denoise : 1,
+        model: ['1', 0],
+        positive: ['2', 0],
+        negative: ['3', 0],
+        latent_image: isImg2Img ? ['7', 0] : ['5', 0],
       },
+      class_type: 'KSampler',
+    },
+    '6': { inputs: { samples: ['4', 0], vae: ['1', 2] }, class_type: 'VAEDecode' },
+    '8': { inputs: { filename_prefix: 'Esperto', images: ['6', 0] }, class_type: 'SaveImage' },
+  };
+
+  if (isImg2Img) {
+    graph['9'] = { inputs: { image: opts.uploadedImageName }, class_type: 'LoadImage' };
+    graph['7'] = { inputs: { pixels: ['9', 0], vae: ['1', 2] }, class_type: 'VAEEncode' };
+  } else {
+    graph['5'] = {
+      inputs: { width: opts.width, height: opts.height, batch_size: 1 },
+      class_type: 'EmptyLatentImage',
     };
   }
 
-  return {
-    ...common,
-    '76': {
-      inputs: { image: opts.uploadedImageName },
-      class_type: 'LoadImage',
+  return graph;
+}
+
+function buildFlux2KleinWorkflow(opts: {
+  model: Extract<ComfyModelOption, { kind: 'flux2' }>;
+  uploadedImageName?: string;
+  prompt: string;
+  seed: number;
+  width: number;
+  height: number;
+  steps: number;
+}) {
+  const isImg2Img = Boolean(opts.uploadedImageName);
+  const graph: Record<string, any> = {
+    '94': {
+      class_type: 'SaveImage',
+      inputs: { filename_prefix: 'Esperto_FLUX2_Klein', images: ['92:65', 0] },
     },
-    '75:66': {
+    '92:61': { class_type: 'KSamplerSelect', inputs: { sampler_name: 'euler' } },
+    '92:62': {
+      class_type: 'Flux2Scheduler',
+      inputs: {
+        width: isImg2Img ? ['92:81', 0] : opts.width,
+        height: isImg2Img ? ['92:81', 1] : opts.height,
+        steps: opts.steps,
+      },
+    },
+    '92:63': {
+      class_type: 'CFGGuider',
+      inputs: {
+        cfg: 1,
+        model: ['92:70', 0],
+        negative: isImg2Img ? ['92:79:76', 0] : ['92:86', 0],
+        positive: isImg2Img ? ['92:79:77', 0] : ['92:74', 0],
+      },
+    },
+    '92:64': {
+      class_type: 'SamplerCustomAdvanced',
+      inputs: {
+        guider: ['92:63', 0],
+        latent_image: ['92:66', 0],
+        noise: ['92:73', 0],
+        sampler: ['92:61', 0],
+        sigmas: ['92:62', 0],
+      },
+    },
+    '92:65': { class_type: 'VAEDecode', inputs: { samples: ['92:64', 0], vae: ['92:72', 0] } },
+    '92:66': {
+      class_type: 'EmptyFlux2LatentImage',
       inputs: {
         batch_size: 1,
-        height: ['75:81', 1],
-        width: ['75:81', 0],
+        width: isImg2Img ? ['92:81', 0] : opts.width,
+        height: isImg2Img ? ['92:81', 1] : opts.height,
       },
-      class_type: 'EmptyFlux2LatentImage',
     },
-    '75:79:76': {
-      inputs: {
-        conditioning: ['75:67', 0],
-        latent: ['75:79:78', 0],
-      },
-      class_type: 'ReferenceLatent',
+    '92:70': {
+      class_type: 'UNETLoader',
+      inputs: { unet_name: opts.model.name, weight_dtype: 'default' },
     },
-    '75:79:77': {
-      inputs: {
-        conditioning: ['75:74', 0],
-        latent: ['75:79:78', 0],
-      },
-      class_type: 'ReferenceLatent',
+    '92:71': {
+      class_type: 'CLIPLoader',
+      inputs: { clip_name: opts.model.textEncoder, device: 'default', type: 'flux2' },
     },
-    '75:79:78': {
-      inputs: {
-        pixels: ['75:80', 0],
-        vae: ['75:72', 0],
-      },
-      class_type: 'VAEEncode',
-    },
-    '75:80': {
-      inputs: {
-        image: ['76', 0],
-        megapixels: 1,
-        resolution_steps: 1,
-        upscale_method: 'nearest-exact',
-      },
-      class_type: 'ImageScaleToTotalPixels',
-    },
-    '75:81': {
-      inputs: { image: ['75:80', 0] },
-      class_type: 'GetImageSize',
-    },
+    '92:72': { class_type: 'VAELoader', inputs: { vae_name: opts.model.vae } },
+    '92:73': { class_type: 'RandomNoise', inputs: { noise_seed: opts.seed } },
+    '92:74': { class_type: 'CLIPTextEncode', inputs: { clip: ['92:71', 0], text: opts.prompt } },
+    '92:86': { class_type: 'ConditioningZeroOut', inputs: { conditioning: ['92:74', 0] } },
   };
+
+  if (isImg2Img) {
+    graph['76'] = { class_type: 'LoadImage', inputs: { image: opts.uploadedImageName } };
+    graph['92:80'] = {
+      class_type: 'ImageScaleToTotalPixels',
+      inputs: { image: ['76', 0], megapixels: 1, resolution_steps: 1, upscale_method: 'nearest-exact' },
+    };
+    graph['92:81'] = { class_type: 'GetImageSize', inputs: { image: ['92:80', 0] } };
+    graph['92:79:78'] = {
+      class_type: 'VAEEncode',
+      inputs: { pixels: ['92:80', 0], vae: ['92:72', 0] },
+    };
+    graph['92:79:76'] = {
+      class_type: 'ReferenceLatent',
+      inputs: { conditioning: ['92:86', 0], latent: ['92:79:78', 0] },
+    };
+    graph['92:79:77'] = {
+      class_type: 'ReferenceLatent',
+      inputs: { conditioning: ['92:74', 0], latent: ['92:79:78', 0] },
+    };
+  }
+
+  return graph;
 }
 
 export async function executeComfyWorkflow(opts: ImageEditOptions): Promise<string> {
-  const host = (opts.host || DEFAULT_COMFY_HOST).replace(/\/+$/, '');
-  const steps = opts.steps || 20;
-  const seed = opts.seed || Math.floor(Math.random() * 1000000000);
-  const width = opts.width || 1024;
-  const height = opts.height || 1024;
-
-  let uploadedFileName: string | undefined = undefined;
+  const host = normalizeHost(opts.host);
+  const steps = Math.max(1, Math.min(50, opts.steps ?? (opts.model.kind === 'flux2' ? 4 : 20)));
+  const cfg = opts.model.kind === 'flux2' ? 1 : (opts.cfgScale ?? 3.5);
+  const seed = opts.seed ?? Math.floor(Math.random() * 2_147_483_647);
+  const width = opts.width ?? 1024;
+  const height = opts.height ?? 1024;
+  let uploadedFileName: string | undefined;
 
   if (opts.referenceImageBase64) {
-    if (opts.onProgress) opts.onProgress(10, 'Carregando imagem base para o ComfyUI...');
-    const tempName = `input_${Date.now()}.png`;
+    opts.onProgress?.(10, 'Enviando imagem de referência ao ComfyUI...');
     uploadedFileName = await invoke<string>('comfyui_upload_image', {
       host,
       imageBase64: opts.referenceImageBase64,
-      fileName: tempName,
+      fileName: `esperto_input_${Date.now()}.png`,
     });
   }
 
-  if (opts.onProgress) opts.onProgress(25, 'Construindo grafo FLUX.2 Klein 4B...');
-  const promptGraph = buildFluxKleinWorkflow({
-    uploadedImageName: uploadedFileName,
-    model: opts.model || 'flux-2-klein',
-    prompt: opts.prompt,
-    negativePrompt: opts.negativePrompt,
-    steps,
-    cfg: opts.model === 'flux-2-klein-distilled' ? 1 : 1 + Math.max(0.05, Math.min(1, opts.guidanceStrength)) * 4,
-    seed,
-    width,
-    height,
+  opts.onProgress?.(22, `Preparando workflow para ${opts.model.label}...`);
+  const promptGraph = opts.model.kind === 'flux2'
+    ? buildFlux2KleinWorkflow({
+        model: opts.model,
+        uploadedImageName: uploadedFileName,
+        prompt: opts.prompt,
+        seed,
+        width,
+        height,
+        steps,
+      })
+    : buildCheckpointWorkflow({
+        model: opts.model,
+        uploadedImageName: uploadedFileName,
+        prompt: opts.prompt,
+        negativePrompt: opts.negativePrompt || 'low quality, blurry, distorted, watermark',
+        denoise: Math.max(0.05, Math.min(1, opts.denoiseStrength)),
+        steps,
+        cfg,
+        seed,
+        width,
+        height,
+      });
+
+  opts.onProgress?.(30, 'Enviando workflow para a fila do ComfyUI...');
+  const promptResponse = await invoke<any>('comfyui_queue_prompt', {
+    host,
+    payload: { prompt: promptGraph, client_id: crypto.randomUUID() },
   });
+  const promptId = promptResponse?.prompt_id;
+  if (!promptId || typeof promptId !== 'string') {
+    throw new Error('O ComfyUI não retornou um identificador de execução.');
+  }
 
-  const clientId = crypto.randomUUID();
+  opts.onProgress?.(35, `Renderizando com ${opts.model.label}...`);
+  const startedAt = Date.now();
+  const timeoutMs = 10 * 60 * 1000;
+  let lastError = '';
 
-  // Todas as chamadas ao ComfyUI passam pelo backend Rust (sem CORS/WebView2).
-  const promptResponse = await invoke<{ prompt_id?: string }>('comfy_queue_prompt', {
-    endpoint: host,
-    payload: { prompt: promptGraph, client_id: clientId },
-  });
-  const promptId = promptResponse.prompt_id;
-  if (!promptId) throw new Error('ComfyUI não retornou um ID de tarefa válido.');
+  while (Date.now() - startedAt < timeoutMs) {
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    const elapsedSeconds = Math.round((Date.now() - startedAt) / 1000);
+    opts.onProgress?.(
+      Math.min(94, 35 + Math.round((elapsedSeconds / 90) * 59)),
+      `Processando ${opts.model.label} · ${elapsedSeconds}s`,
+    );
 
-  if (opts.onProgress) opts.onProgress(35, 'Renderizando tensores com FLUX.2...');
+    try {
+      const history = await invoke<Record<string, any>>('comfyui_get_history', { host, promptId });
+      const task = history?.[promptId];
+      if (!task) continue;
 
-  // Polling ativo do histórico até a imagem ser gerada
-  const maxWaitMs = 120000;
-  const pollInterval = 1000;
-  const startTime = Date.now();
+      if (task.status?.status_str === 'error' || task.status?.completed === false && task.status?.messages?.some((m: any[]) => m?.[0] === 'execution_error')) {
+        const details = task.status?.messages?.map((m: any[]) => JSON.stringify(m)).join('\n') || 'O ComfyUI informou uma falha durante a execução.';
+        throw new Error(`COMFY_EXECUTION_ERROR: ${details}`);
+      }
 
-  while (Date.now() - startTime < maxWaitMs) {
-    await new Promise((r) => setTimeout(r, pollInterval));
-
-    const elapsed = (Date.now() - startTime) / 1000;
-    const estimatedPercent = Math.min(92, Math.round(35 + (elapsed / 25) * 55));
-    if (opts.onProgress) {
-      opts.onProgress(estimatedPercent, `Inferindo ${opts.model === 'flux-2-klein-distilled' ? 'FLUX.2 Klein 4B Distilled' : 'FLUX.2 Klein 4B'} (${elapsed.toFixed(0)}s)...`);
-    }
-
-    const historyData = await invoke<Record<string, any>>('comfy_get_history', {
-      endpoint: host,
-      promptId,
-    });
-    const task = historyData[promptId];
-    if (task?.outputs) {
-      for (const outNode of Object.values(task.outputs) as any[]) {
-        if (outNode.images?.length) {
-          const imgInfo = outNode.images[0];
-          opts.onProgress?.(98, 'Baixando imagem resultante...');
-          const imageBytes = await invoke<number[]>('comfy_get_view_image', {
-            endpoint: host,
-            filename: imgInfo.filename,
-            subfolder: imgInfo.subfolder || '',
-            typeFolder: imgInfo.type || 'output',
+      if (task.outputs) {
+        const imageEntry = Object.values(task.outputs as Record<string, any>)
+          .flatMap((output: any) => output?.images || [])[0];
+        if (imageEntry?.filename) {
+          opts.onProgress?.(97, 'Baixando imagem gerada...');
+          const imageData = await invoke<string>('comfyui_get_output_image', {
+            host,
+            filename: imageEntry.filename,
+            subfolder: imageEntry.subfolder || '',
+            folderType: imageEntry.type || 'output',
           });
-          const blob = new Blob([new Uint8Array(imageBytes).buffer as ArrayBuffer], { type: 'image/png' });
-          const finalDataUrl = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(String(reader.result));
-            reader.onerror = () => reject(new Error('Não foi possível converter a imagem gerada.'));
-            reader.readAsDataURL(blob);
-          });
-          opts.onProgress?.(100, 'Renderização concluída!');
-          return finalDataUrl;
+          opts.onProgress?.(100, 'Imagem concluída.');
+          return imageData;
         }
+      }
+    } catch (error: any) {
+      lastError = error?.message || String(error);
+      if (/COMFY_EXECUTION_ERROR|Value not in list|Prompt outputs failed validation|execution_error/i.test(lastError)) {
+        throw new Error(`O workflow foi rejeitado pelo ComfyUI.\n${lastError}`);
       }
     }
   }
 
-  throw new Error('Tempo limite excedido aguardando o ComfyUI processar a imagem.');
+  throw new Error(
+    `Tempo limite aguardando o ComfyUI finalizar a geração.${lastError ? ` Último erro: ${lastError}` : ''}`,
+  );
 }
