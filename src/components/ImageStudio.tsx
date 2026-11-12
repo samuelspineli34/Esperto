@@ -16,7 +16,7 @@ import {
   Server,
   Zap,
 } from 'lucide-react';
-import { checkComfyStatus, getComfyModelOptions, executeComfyWorkflow, DEFAULT_COMFY_HOST, ComfyServerStatus, ComfyModelOption } from '../services/comfyui';
+import { checkComfyStatus, getComfyModelOptions, executeComfyWorkflow, isCheckpointClipCompatibilityError, DEFAULT_COMFY_HOST, ComfyServerStatus, ComfyModelOption } from '../services/comfyui';
 import { detectHardware, HardwareAuditResult } from '../services/hardware';
 import { AppErrorInfo } from './ErrorModal';
 
@@ -31,6 +31,10 @@ export const ImageStudio: React.FC<Props> = ({ onErrorTrigger, onSendImageToChat
   const [checkingComfy, setCheckingComfy] = useState(false);
   const [modelOptions, setModelOptions] = useState<ComfyModelOption[]>([]);
   const [modelInventoryError, setModelInventoryError] = useState('');
+  const [incompatibleModelIds, setIncompatibleModelIds] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('esperto:comfy:incompatible-models') || '[]'); }
+    catch { return []; }
+  });
 
   const [hardwareInfo, setHardwareInfo] = useState<HardwareAuditResult | null>(null);
 
@@ -57,9 +61,13 @@ export const ImageStudio: React.FC<Props> = ({ onErrorTrigger, onSendImageToChat
     refreshStatus();
   }, []);
 
-  const refreshStatus = async () => {
+  const refreshStatus = async (forceRevalidate = false) => {
     setCheckingComfy(true);
     setModelInventoryError('');
+    if (forceRevalidate) {
+      setIncompatibleModelIds([]);
+      try { localStorage.removeItem('esperto:comfy:incompatible-models'); } catch { /* storage unavailable */ }
+    }
     try {
       const [comfy, hw] = await Promise.all([
         checkComfyStatus(comfyHost),
@@ -77,18 +85,23 @@ export const ImageStudio: React.FC<Props> = ({ onErrorTrigger, onSendImageToChat
 
       try {
         const discovered = await getComfyModelOptions(comfyHost);
-        setModelOptions(discovered.options);
+        const blockedIds = forceRevalidate ? [] : incompatibleModelIds;
+        const usableOptions = discovered.options.filter((option) => !blockedIds.includes(option.id));
+        setModelOptions(usableOptions);
         setSelectedModel((current) =>
-          discovered.options.some((option) => option.id === current)
+          usableOptions.some((option) => option.id === current)
             ? current
-            : discovered.options[0]?.id || '',
+            : usableOptions[0]?.id || '',
         );
-        if (discovered.options.length === 0) {
+        if (usableOptions.length === 0) {
           const hasFluxParts = discovered.inventory.diffusion_models.length > 0;
+          const allHiddenAsIncompatible = discovered.options.length > 0 && blockedIds.length > 0;
           setModelInventoryError(
-            hasFluxParts
-              ? 'FLUX.2 detectado parcialmente. Verifique qwen_3_4b.safetensors em models/text_encoders e flux2-vae.safetensors em models/vae. O modelo principal deve ficar em models/diffusion_models.'
-              : 'Nenhum modelo compatível foi encontrado. Checkpoints ficam em models/checkpoints; FLUX.2 Klein usa models/diffusion_models, models/text_encoders e models/vae. Depois, atualize a lista.',
+            allHiddenAsIncompatible
+              ? 'Os modelos encontrados já falharam na verificação de compatibilidade nesta instalação. Use “Revalidar” depois de corrigir ou substituir os arquivos no ComfyUI.'
+              : hasFluxParts
+                ? 'FLUX.2 detectado parcialmente. Verifique o encoder Qwen 3 4B em models/text_encoders e o VAE FLUX.2 em models/vae. O modelo principal deve ficar em models/diffusion_models.'
+                : 'Nenhum modelo compatível foi encontrado. Checkpoints completos ficam em models/checkpoints; FLUX.2 Klein usa models/diffusion_models, models/text_encoders e models/vae. Depois, atualize a lista.',
           );
         }
       } catch (error: any) {
@@ -152,12 +165,37 @@ export const ImageStudio: React.FC<Props> = ({ onErrorTrigger, onSendImageToChat
       setOutputImage(resultB64);
       if (referenceImage) setShowComparison(true);
     } catch (err: any) {
-      onErrorTrigger({
-        title: 'Falha no Image Studio (ComfyUI)',
-        context: `Modelo: ${activeModel.label}`, 
-        message: err?.message || 'Não foi possível concluir o pipeline de geração da imagem.',
-        technicalDetails: err?.toString() || 'ComfyUI endpoint error',
-      });
+      const errorMessage = err?.message || 'Não foi possível concluir o pipeline de geração da imagem.';
+      if (activeModel.kind === 'checkpoint' && isCheckpointClipCompatibilityError(errorMessage)) {
+        // ComfyUI's object_info lists filenames, but cannot guarantee that a
+        // checkpoint contains a valid CLIP. Learn from the actual loader result.
+        setIncompatibleModelIds((current) => {
+          const updated = current.includes(activeModel.id) ? current : [...current, activeModel.id];
+          try { localStorage.setItem('esperto:comfy:incompatible-models', JSON.stringify(updated)); } catch { /* storage unavailable */ }
+          return updated;
+        });
+        setModelOptions((current) => current.filter((model) => model.id !== activeModel.id));
+        const nextModel = modelOptions.find((model) => model.id !== activeModel.id && !incompatibleModelIds.includes(model.id));
+        setSelectedModel(nextModel?.id || '');
+        setModelInventoryError(
+          nextModel
+            ? `${activeModel.label} não possui um encoder CLIP válido. Foi removido da seleção; o próximo modelo compatível já foi selecionado.`
+            : `${activeModel.label} não possui um encoder CLIP válido. Nenhum outro modelo compatível está disponível. Verifique os arquivos ou instale um checkpoint completo.`,
+        );
+        onErrorTrigger({
+          title: 'Checkpoint incompatível',
+          context: `Modelo: ${activeModel.label}`,
+          message: 'O ComfyUI carregou o arquivo, mas não encontrou um encoder CLIP válido. Esse arquivo provavelmente é um modelo parcial (UNET/diffusion), não um checkpoint completo. O Esperto marcou esse modelo como incompatível nesta sessão e selecionou outro disponível.',
+          technicalDetails: errorMessage,
+        });
+      } else {
+        onErrorTrigger({
+          title: 'Falha no Image Studio (ComfyUI)',
+          context: `Modelo: ${activeModel.label}`,
+          message: errorMessage,
+          technicalDetails: err?.toString() || 'ComfyUI endpoint error',
+        });
+      }
     } finally {
       setIsGenerating(false);
       setGenerationProgress(0);
@@ -277,10 +315,21 @@ export const ImageStudio: React.FC<Props> = ({ onErrorTrigger, onSendImageToChat
             )}
             <div className="flex items-center justify-between gap-2 pt-1">
               <span className="text-[10px] text-zinc-500">{modelOptions.length} modelo(s) compatível(is) encontrado(s)</span>
-              <button type="button" onClick={refreshStatus} disabled={checkingComfy} className="text-[10px] text-purple-300 hover:text-purple-200 disabled:opacity-50">
-                Atualizar modelos
-              </button>
+              <div className="flex items-center gap-3">
+                <button type="button" onClick={() => refreshStatus(true)} disabled={checkingComfy} className="text-[10px] text-zinc-400 hover:text-white disabled:opacity-50" title="Limpa incompatibilidades memorizadas e testa os modelos novamente">
+                  Revalidar
+                </button>
+                <button type="button" onClick={() => refreshStatus(false)} disabled={checkingComfy} className="text-[10px] text-purple-300 hover:text-purple-200 disabled:opacity-50">
+                  {checkingComfy ? 'Verificando...' : 'Atualizar modelos'}
+                </button>
+              </div>
             </div>
+            {modelInventoryError && modelOptions.length > 0 && (
+              <p role="status" className="text-[10px] leading-relaxed text-amber-300/90">{modelInventoryError}</p>
+            )}
+            {incompatibleModelIds.length > 0 && (
+              <p className="text-[10px] text-zinc-500">{incompatibleModelIds.length} modelo(s) incompatível(is) ocultado(s) nesta sessão. Atualize após corrigir os arquivos no ComfyUI.</p>
+            )}
           </div>
 
           {/* Upload de Imagem de Referência (Image-to-Image) */}

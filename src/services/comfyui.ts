@@ -80,7 +80,15 @@ export async function getComfyModelOptions(host: string = DEFAULT_COMFY_HOST): P
     vaes: raw?.vaes || [],
   };
 
-  const options: ComfyModelOption[] = inventory.checkpoints.map((name): ComfyModelOption => ({
+  // CheckpointLoaderSimple must expose a usable CLIP output. Files that are
+  // clearly component-only weights are not full checkpoints and frequently
+  // produce CLIP=null at runtime (the exact failure reported by ComfyUI).
+  const checkpointCandidates = inventory.checkpoints.filter((name) =>
+    !/(^|[\/_ .-])(clip|text[_ -]?encoder|t5|qwen|vae|unet|diffusion[_ -]?model)([\/_ .-]|$)/i.test(name) &&
+    !/flux[._ -]?2|flux2.*klein/i.test(name)
+  );
+
+  const options: ComfyModelOption[] = checkpointCandidates.map((name): ComfyModelOption => ({
     id: `checkpoint:${name}`,
     kind: 'checkpoint',
     name,
@@ -266,6 +274,12 @@ function buildFlux2KleinWorkflow(opts: {
   }
 
   return graph;
+}
+
+/** True when ComfyUI reports a checkpoint whose loader returned no CLIP. */
+export function isCheckpointClipCompatibilityError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return /clip input is invalid:\s*None|checkpoint does not contain a valid clip|CLIP.*(?:invalid|null|None)/i.test(message);
 }
 
 export async function executeComfyWorkflow(opts: ImageEditOptions): Promise<string> {
