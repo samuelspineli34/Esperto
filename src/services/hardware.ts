@@ -35,29 +35,26 @@ export interface HardwareAuditResult {
 }
 
 export async function detectHardware(): Promise<HardwareAuditResult> {
-  let specs: SystemHardwareInfo;
-  try {
-    specs = await invoke<SystemHardwareInfo>('get_system_specs');
-  } catch (e) {
-    console.warn('Fallback hardware detection:', e);
-    specs = {
-      os_name: 'windows',
-      os_version: '10/11',
-      total_ram_mb: 16384,
-      available_ram_mb: 8192,
-      cpu_cores: 8,
-      cpu_brand: 'CPU x86_64',
-      gpu_name: 'NVIDIA GeForce RTX 2060 Super',
-      gpu_vram_mb: 8192,
-      has_nvidia_gpu: true,
+  const specs: SystemHardwareInfo = await invoke<SystemHardwareInfo>('get_system_specs').catch((error) => {
+    console.warn('Hardware detection failed:', error);
+    return {
+      os_name: 'unknown',
+      os_version: 'Não detectado',
+      total_ram_mb: 0,
+      available_ram_mb: 0,
+      cpu_cores: 0,
+      cpu_brand: 'Não detectado',
+      gpu_name: 'GPU não detectada',
+      gpu_vram_mb: 0,
+      has_nvidia_gpu: false,
       has_amd_gpu: false,
       has_apple_silicon: false,
     };
-  }
+  });
 
   const vramGb = specs.gpu_vram_mb / 1024;
   let tier: HardwareTier = 'entry';
-  let tierLabel = 'Básico (Até 6GB VRAM)';
+  let tierLabel = vramGb > 0 ? 'Entrada (até 6 GB de VRAM)' : 'Hardware não identificado';
 
   if (vramGb >= 20) {
     tier = 'workstation';
@@ -71,50 +68,49 @@ export async function detectHardware(): Promise<HardwareAuditResult> {
   }
 
   const recommendations: ModelRecommendation[] = [
-    // Image Generation & Editing
     {
-      id: 'flux-2-klein-4b',
-      name: 'FLUX.2 Klein 4B (ComfyUI / GGUF Q4_K_M)',
+      id: 'flux-2-klein-4b-base',
+      name: 'FLUX.2 Klein 4B Base (ComfyUI FP8)',
       category: 'image-gen',
-      badge: 'FLUX.2 Image-to-Image',
-      description: 'Arquitetura Klein ultrarrápida com fidelidade fotográfica superior e controle de edição de alta precisão.',
-      vramRequiredGb: 6.5,
-      isRecommended: vramGb >= 7.5,
-      reason: vramGb >= 7.5
-        ? 'Perfeito para sua GPU de 8GB: cabe 100% na VRAM com cache otimizado sem descarregar para RAM.'
-        : 'Requer pelo menos 6.5GB de VRAM livre para geração em velocidade máxima.',
+      badge: 'Edição e geração',
+      description: 'Variante base para maior flexibilidade e qualidade, com workflow oficial do ComfyUI.',
+      vramRequiredGb: 9.2,
+      isRecommended: vramGb >= 9.2,
+      reason: vramGb >= 9.2
+        ? 'A VRAM detectada atende à referência de 9,2 GB; mantenha margem para o restante do sistema.'
+        : 'Referência de aproximadamente 9,2 GB de VRAM. Pode exigir offload em GPUs menores.',
     },
     {
-      id: 'sdxl-turbo',
-      name: 'SDXL Turbo (1-4 Steps)',
+      id: 'flux-2-klein-4b-distilled',
+      name: 'FLUX.2 Klein 4B Distilled (ComfyUI FP8)',
       category: 'image-gen',
-      badge: 'Velocidade Extrema',
-      description: 'Geração instantânea em até 4 passos. Ótimo para rascunhos rápidos.',
-      vramRequiredGb: 5.0,
-      isRecommended: vramGb < 7.5,
-      reason: 'Ideal para máquinas de menor consumo de VRAM ou para iterações em menos de 1 segundo.',
+      badge: 'Rápido · 4 etapas',
+      description: 'Variante destilada para geração e edição mais rápidas com o workflow oficial.',
+      vramRequiredGb: 8.4,
+      isRecommended: vramGb >= 8.4,
+      reason: vramGb >= 8.4
+        ? 'É a variante mais indicada para hardware com VRAM limitada, mas mantenha margem de memória.'
+        : 'Referência de aproximadamente 8,4 GB de VRAM; pode precisar de offload ou redução de resolução.',
     },
-
-    // Coding & Autonomous Agent
     {
       id: 'qwen2.5-coder:7b',
       name: 'Qwen2.5-Coder 7B (Ollama Q4)',
       category: 'code',
-      badge: 'Líder em Programação',
-      description: 'Especialista em TypeScript, Rust, Python e edição autônoma de arquivos inteiros.',
+      badge: 'Programação',
+      description: 'Modelo compacto para tarefas de programação, revisão e explicação de código.',
       vramRequiredGb: 5.5,
       isRecommended: vramGb >= 6.0,
-      reason: 'Modelo padrão ouro para agentes autônomos locais em GPUs de 8GB.',
+      reason: 'Boa opção compacta para programação; desempenho depende da quantização e memória disponível.',
     },
     {
       id: 'qwen3-vl:4b',
       name: 'Qwen3-VL 4B (Multimodal com Visão)',
       category: 'vision',
-      badge: 'Visão & Screenshots',
-      description: 'Analisa diagramas de arquitetura, capturas de tela da aplicação e lê UI direto do buffer.',
+      badge: 'Visão e screenshots',
+      description: 'Modelo multimodal para analisar imagens, interfaces e capturas de tela.',
       vramRequiredGb: 4.8,
-      isRecommended: true,
-      reason: 'Compacto e multimodal; permite alternar texto e imagem sem exceder o orçamento térmico.',
+      isRecommended: specs.total_ram_mb >= 8192,
+      reason: 'Modelo multimodal compacto; confirme suporte de visão na versão instalada.',
     },
   ];
 

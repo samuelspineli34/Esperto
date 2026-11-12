@@ -52,6 +52,7 @@ export async function checkForUpdates(): Promise<ReleaseInfo | null> {
     // 2. Consulta a API do GitHub Releases
     const res = await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest`, {
       headers: { Accept: 'application/vnd.github.v3+json' },
+      signal: AbortSignal.timeout(8000),
     });
 
     if (!res.ok) {
@@ -65,9 +66,9 @@ export async function checkForUpdates(): Promise<ReleaseInfo | null> {
 
     const assets = data.assets || [];
     const installerAsset = assets.find((a: any) =>
-      a.name.endsWith('.exe') || a.name.endsWith('.msi') || a.name.endsWith('.zip')
+      a.name.toLowerCase().endsWith('.exe')
     );
-    const downloadUrl = installerAsset ? installerAsset.browser_download_url : data.html_url;
+    const downloadUrl = installerAsset?.browser_download_url;
     const installerSizeMb = installerAsset ? Math.round(installerAsset.size / (1024 * 1024)) : undefined;
 
     return {

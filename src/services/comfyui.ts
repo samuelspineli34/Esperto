@@ -8,12 +8,12 @@ export interface ComfyServerStatus {
 
 export interface ImageEditOptions {
   host?: string;
+  model?: 'flux-2-klein' | 'flux-2-klein-distilled';
   prompt: string;
   negativePrompt?: string;
   referenceImageBase64?: string;
-  denoiseStrength: number; // 0.05 a 1.0 (intensidade da alteração)
+  guidanceStrength: number; // 0.05 a 1.0 (força de orientação do prompt)
   steps?: number;
-  cfgScale?: number;
   seed?: number;
   width?: number;
   height?: number;
@@ -27,12 +27,8 @@ export const DEFAULT_COMFY_HOST = 'http://127.0.0.1:8188';
  */
 export async function checkComfyStatus(host: string = DEFAULT_COMFY_HOST): Promise<ComfyServerStatus> {
   try {
-    const res: any = await invoke('check_comfyui_status', { host });
-    return {
-      isOnline: Boolean(res.is_online),
-      devices: res.devices || [],
-      version: res.version || 'v0.2.x',
-    };
+    const isOnline = await invoke<boolean>('comfy_check_status', { endpoint: host });
+    return { isOnline, devices: [], version: isOnline ? 'ComfyUI conectado' : '' };
   } catch {
     return {
       isOnline: false,
@@ -47,9 +43,9 @@ export async function checkComfyStatus(host: string = DEFAULT_COMFY_HOST): Promi
  */
 function buildFluxKleinWorkflow(opts: {
   uploadedImageName?: string;
+  model: 'flux-2-klein' | 'flux-2-klein-distilled';
   prompt: string;
   negativePrompt?: string;
-  denoise: number;
   steps: number;
   cfg: number;
   seed: number;
@@ -57,148 +53,165 @@ function buildFluxKleinWorkflow(opts: {
   height: number;
 }) {
   const isImg2Img = Boolean(opts.uploadedImageName);
+  const modelFile = opts.model === 'flux-2-klein-distilled'
+    ? 'flux-2-klein-4b-fp8.safetensors'
+    : 'flux-2-klein-base-4b-fp8.safetensors';
+  const steps = opts.model === 'flux-2-klein-distilled' ? 4 : opts.steps;
+  const cfg = opts.model === 'flux-2-klein-distilled' ? 1 : opts.cfg;
 
-  if (isImg2Img) {
-    // Pipeline FLUX.2 Klein Image-to-Image
+  const common = {
+    '9': {
+      inputs: {
+        filename_prefix: 'Esperto_FLUX2_Klein',
+        images: ['75:65', 0],
+      },
+      class_type: 'SaveImage',
+    },
+    '75:61': {
+      inputs: { sampler_name: 'euler' },
+      class_type: 'KSamplerSelect',
+    },
+    '75:62': {
+      inputs: {
+        height: isImg2Img ? ['75:81', 1] : opts.height,
+        steps,
+        width: isImg2Img ? ['75:81', 0] : opts.width,
+      },
+      class_type: 'Flux2Scheduler',
+    },
+    '75:63': {
+      inputs: {
+        cfg,
+        model: ['75:70', 0],
+        negative: isImg2Img ? ['75:79:76', 0] : ['75:67', 0],
+        positive: isImg2Img ? ['75:79:77', 0] : ['75:74', 0],
+      },
+      class_type: 'CFGGuider',
+    },
+    '75:64': {
+      inputs: {
+        guider: ['75:63', 0],
+        latent_image: ['75:66', 0],
+        noise: ['75:73', 0],
+        sampler: ['75:61', 0],
+        sigmas: ['75:62', 0],
+      },
+      class_type: 'SamplerCustomAdvanced',
+    },
+    '75:65': {
+      inputs: {
+        samples: ['75:64', 0],
+        vae: ['75:72', 0],
+      },
+      class_type: 'VAEDecode',
+    },
+    '75:67': {
+      inputs: {
+        clip: ['75:71', 0],
+        text: opts.negativePrompt || '',
+      },
+      class_type: 'CLIPTextEncode',
+    },
+    '75:70': {
+      inputs: {
+        unet_name: modelFile,
+        weight_dtype: 'default',
+      },
+      class_type: 'UNETLoader',
+    },
+    '75:71': {
+      inputs: {
+        clip_name: 'qwen_3_4b.safetensors',
+        device: 'default',
+        type: 'flux2',
+      },
+      class_type: 'CLIPLoader',
+    },
+    '75:72': {
+      inputs: { vae_name: 'flux2-vae.safetensors' },
+      class_type: 'VAELoader',
+    },
+    '75:73': {
+      inputs: { noise_seed: opts.seed },
+      class_type: 'RandomNoise',
+    },
+    '75:74': {
+      inputs: {
+        clip: ['75:71', 0],
+        text: opts.prompt,
+      },
+      class_type: 'CLIPTextEncode',
+    },
+  } as Record<string, any>;
+
+  if (!isImg2Img) {
     return {
-      "3": {
-        "inputs": {
-          "seed": opts.seed,
-          "steps": opts.steps,
-          "cfg": opts.cfg,
-          "sampler_name": "euler",
-          "scheduler": "simple",
-          "denoise": opts.denoise,
-          "model": ["4", 0],
-          "positive": ["6", 0],
-          "negative": ["7", 0],
-          "latent_image": ["12", 0]
+      ...common,
+      '75:66': {
+        inputs: {
+          batch_size: 1,
+          height: opts.height,
+          width: opts.width,
         },
-        "class_type": "KSampler"
+        class_type: 'EmptyFlux2LatentImage',
       },
-      "4": {
-        "inputs": {
-          "ckpt_name": "flux2-klein-4b.safetensors"
-        },
-        "class_type": "CheckpointLoaderSimple"
-      },
-      "6": {
-        "inputs": {
-          "text": opts.prompt,
-          "clip": ["4", 1]
-        },
-        "class_type": "CLIPTextEncode"
-      },
-      "7": {
-        "inputs": {
-          "text": opts.negativePrompt || "low quality, blurry, artifact, distorted",
-          "clip": ["4", 1]
-        },
-        "class_type": "CLIPTextEncode"
-      },
-      "8": {
-        "inputs": {
-          "samples": ["3", 0],
-          "vae": ["4", 2]
-        },
-        "class_type": "VAEDecode"
-      },
-      "9": {
-        "inputs": {
-          "filename_prefix": "Esperto_FLUX_Klein",
-          "images": ["8", 0]
-        },
-        "class_type": "SaveImage"
-      },
-      "10": {
-        "inputs": {
-          "image": opts.uploadedImageName
-        },
-        "class_type": "LoadImage"
-      },
-      "12": {
-        "inputs": {
-          "pixels": ["10", 0],
-          "vae": ["4", 2]
-        },
-        "class_type": "VAEEncode"
-      }
     };
   }
 
-  // Pipeline FLUX.2 Klein Text-to-Image
   return {
-    "3": {
-      "inputs": {
-        "seed": opts.seed,
-        "steps": opts.steps,
-        "cfg": opts.cfg,
-        "sampler_name": "euler",
-        "scheduler": "simple",
-        "denoise": 1.0,
-        "model": ["4", 0],
-        "positive": ["6", 0],
-        "negative": ["7", 0],
-        "latent_image": ["5", 0]
-      },
-      "class_type": "KSampler"
+    ...common,
+    '76': {
+      inputs: { image: opts.uploadedImageName },
+      class_type: 'LoadImage',
     },
-    "4": {
-      "inputs": {
-        "ckpt_name": "flux2-klein-4b.safetensors"
+    '75:66': {
+      inputs: {
+        batch_size: 1,
+        height: ['75:81', 1],
+        width: ['75:81', 0],
       },
-      "class_type": "CheckpointLoaderSimple"
+      class_type: 'EmptyFlux2LatentImage',
     },
-    "5": {
-      "inputs": {
-        "width": opts.width,
-        "height": opts.height,
-        "batch_size": 1
+    '75:79:76': {
+      inputs: {
+        conditioning: ['75:67', 0],
+        latent: ['75:79:78', 0],
       },
-      "class_type": "EmptyLatentImage"
+      class_type: 'ReferenceLatent',
     },
-    "6": {
-      "inputs": {
-        "text": opts.prompt,
-        "clip": ["4", 1]
+    '75:79:77': {
+      inputs: {
+        conditioning: ['75:74', 0],
+        latent: ['75:79:78', 0],
       },
-      "class_type": "CLIPTextEncode"
+      class_type: 'ReferenceLatent',
     },
-    "7": {
-      "inputs": {
-        "text": opts.negativePrompt || "blurry, low quality, bad anatomy",
-        "clip": ["4", 1]
+    '75:79:78': {
+      inputs: {
+        pixels: ['75:80', 0],
+        vae: ['75:72', 0],
       },
-      "class_type": "CLIPTextEncode"
+      class_type: 'VAEEncode',
     },
-    "8": {
-      "inputs": {
-        "samples": ["3", 0],
-        "vae": ["4", 2]
+    '75:80': {
+      inputs: {
+        image: ['76', 0],
+        megapixels: 1,
+        resolution_steps: 1,
+        upscale_method: 'nearest-exact',
       },
-      "class_type": "VAEDecode"
+      class_type: 'ImageScaleToTotalPixels',
     },
-    "9": {
-      "inputs": {
-        "filename_prefix": "Esperto_FLUX_Klein",
-        "images": ["8", 0]
-      },
-      "class_type": "SaveImage"
-    }
+    '75:81': {
+      inputs: { image: ['75:80', 0] },
+      class_type: 'GetImageSize',
+    },
   };
 }
 
-/**
- * Orquestra a execução completa:
- * 1. Faz upload da imagem de referência no ComfyUI (se fornecida).
- * 2. Envia o prompt/grafo via REST para a fila do ComfyUI.
- * 3. Monitora o progresso de amostragem.
- * 4. Baixa e retorna a imagem resultante em Base64.
- */
 export async function executeComfyWorkflow(opts: ImageEditOptions): Promise<string> {
   const host = (opts.host || DEFAULT_COMFY_HOST).replace(/\/+$/, '');
   const steps = opts.steps || 20;
-  const cfg = opts.cfgScale || 3.5;
   const seed = opts.seed || Math.floor(Math.random() * 1000000000);
   const width = opts.width || 1024;
   const height = opts.height || 1024;
@@ -218,11 +231,11 @@ export async function executeComfyWorkflow(opts: ImageEditOptions): Promise<stri
   if (opts.onProgress) opts.onProgress(25, 'Construindo grafo FLUX.2 Klein 4B...');
   const promptGraph = buildFluxKleinWorkflow({
     uploadedImageName: uploadedFileName,
+    model: opts.model || 'flux-2-klein',
     prompt: opts.prompt,
     negativePrompt: opts.negativePrompt,
-    denoise: Math.max(0.05, Math.min(1.0, opts.denoiseStrength)),
     steps,
-    cfg,
+    cfg: opts.model === 'flux-2-klein-distilled' ? 1 : 1 + Math.max(0.05, Math.min(1, opts.guidanceStrength)) * 4,
     seed,
     width,
     height,
@@ -230,23 +243,13 @@ export async function executeComfyWorkflow(opts: ImageEditOptions): Promise<stri
 
   const clientId = crypto.randomUUID();
 
-  // Envia a requisição de prompt
-  const res = await fetch(`${host}/prompt`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt: promptGraph, client_id: clientId }),
+  // Todas as chamadas ao ComfyUI passam pelo backend Rust (sem CORS/WebView2).
+  const promptResponse = await invoke<{ prompt_id?: string }>('comfy_queue_prompt', {
+    endpoint: host,
+    payload: { prompt: promptGraph, client_id: clientId },
   });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Falha ao disparar pipeline no ComfyUI: ${errText}`);
-  }
-
-  const promptResponse = await res.json();
   const promptId = promptResponse.prompt_id;
-  if (!promptId) {
-    throw new Error('ComfyUI não retornou um ID de tarefa válido.');
-  }
+  if (!promptId) throw new Error('ComfyUI não retornou um ID de tarefa válido.');
 
   if (opts.onProgress) opts.onProgress(35, 'Renderizando tensores com FLUX.2...');
 
@@ -261,36 +264,37 @@ export async function executeComfyWorkflow(opts: ImageEditOptions): Promise<stri
     const elapsed = (Date.now() - startTime) / 1000;
     const estimatedPercent = Math.min(92, Math.round(35 + (elapsed / 25) * 55));
     if (opts.onProgress) {
-      opts.onProgress(estimatedPercent, `Inferindo FLUX.2 Klein (${elapsed.toFixed(0)}s)...`);
+      opts.onProgress(estimatedPercent, `Inferindo ${opts.model === 'flux-2-klein-distilled' ? 'FLUX.2 Klein 4B Distilled' : 'FLUX.2 Klein 4B'} (${elapsed.toFixed(0)}s)...`);
     }
 
-    try {
-      const historyRes = await fetch(`${host}/history/${promptId}`);
-      if (historyRes.ok) {
-        const historyData = await historyRes.json();
-        const task = historyData[promptId];
-        if (task && task.outputs) {
-          // Localiza o nó SaveImage (ID 9 no nosso grafo)
-          for (const nodeId of Object.keys(task.outputs)) {
-            const outNode = task.outputs[nodeId];
-            if (outNode.images && outNode.images.length > 0) {
-              const imgInfo = outNode.images[0];
-              if (opts.onProgress) opts.onProgress(98, 'Baixando imagem resultante...');
-
-              const finalB64 = await invoke<string>('comfyui_get_output_image', {
-                host,
-                filename: imgInfo.filename,
-                subfolder: imgInfo.subfolder || '',
-                folderType: imgInfo.type || 'output',
-              });
-
-              if (opts.onProgress) opts.onProgress(100, 'Renderização concluída!');
-              return finalB64;
-            }
-          }
+    const historyData = await invoke<Record<string, any>>('comfy_get_history', {
+      endpoint: host,
+      promptId,
+    });
+    const task = historyData[promptId];
+    if (task?.outputs) {
+      for (const outNode of Object.values(task.outputs) as any[]) {
+        if (outNode.images?.length) {
+          const imgInfo = outNode.images[0];
+          opts.onProgress?.(98, 'Baixando imagem resultante...');
+          const imageBytes = await invoke<number[]>('comfy_get_view_image', {
+            endpoint: host,
+            filename: imgInfo.filename,
+            subfolder: imgInfo.subfolder || '',
+            typeFolder: imgInfo.type || 'output',
+          });
+          const blob = new Blob([new Uint8Array(imageBytes).buffer as ArrayBuffer], { type: 'image/png' });
+          const finalDataUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result));
+            reader.onerror = () => reject(new Error('Não foi possível converter a imagem gerada.'));
+            reader.readAsDataURL(blob);
+          });
+          opts.onProgress?.(100, 'Renderização concluída!');
+          return finalDataUrl;
         }
       }
-    } catch (_) {}
+    }
   }
 
   throw new Error('Tempo limite excedido aguardando o ComfyUI processar a imagem.');

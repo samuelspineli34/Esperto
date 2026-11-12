@@ -263,9 +263,9 @@ export default function App() {
     const initLocalModels = async () => {
       await ensureOllamaRunning(settings.ollamaHost, settings.ollamaCustomPath);
       const res = await getInstalledOllamaModels(settings.ollamaHost, settings.ollamaCustomPath);
-      if (res.models && res.models.length > 0) {
-        registerLocalOllamaModels(res.models);
-      }
+      // Sincroniza também uma lista vazia: evita manter modelos antigos em memória
+      // quando o Ollama foi reinstalado ou o diretório de modelos mudou.
+      registerLocalOllamaModels(res.models || []);
     };
     initLocalModels();
   }, [settings.ollamaHost, settings.ollamaCustomPath]);

@@ -56,14 +56,14 @@ async fn get_system_specs() -> Result<SystemHardwareInfo, String> {
     let mut info = SystemHardwareInfo {
         os_name: std::env::consts::OS.to_string(),
         os_version: "10/11".to_string(),
-        total_ram_mb: 16384,
-        available_ram_mb: 8192,
+        total_ram_mb: 0,
+        available_ram_mb: 0,
         cpu_cores: std::thread::available_parallelism()
             .map(|p| p.get())
             .unwrap_or(8),
         cpu_brand: "Processador x86_64".to_string(),
         gpu_name: "GPU Integrada / Não Detectada".to_string(),
-        gpu_vram_mb: 4096,
+        gpu_vram_mb: 0,
         has_nvidia_gpu: false,
         has_amd_gpu: false,
         has_apple_silicon: cfg!(target_os = "macos")
@@ -72,6 +72,20 @@ async fn get_system_specs() -> Result<SystemHardwareInfo, String> {
 
     #[cfg(target_os = "windows")]
     {
+        // Detecta RAM total/disponível e versão real do Windows. Nunca usa valores fictícios.
+        if let Ok(output) = Command::new("powershell").args([
+            "-NoProfile", "-Command",
+            "$os=Get-CimInstance Win32_OperatingSystem; [pscustomobject]@{Total=[math]::Round($os.TotalVisibleMemorySize/1024);Free=[math]::Round($os.FreePhysicalMemory/1024);Version=$os.Caption+' '+$os.Version} | ConvertTo-Json -Compress"
+        ]).output() {
+            if output.status.success() {
+                if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&output.stdout) {
+                    info.total_ram_mb = v["Total"].as_u64().unwrap_or(0);
+                    info.available_ram_mb = v["Free"].as_u64().unwrap_or(0);
+                    info.os_version = v["Version"].as_str().unwrap_or("Windows").to_string();
+                }
+            }
+        }
+
         // Detecção NVIDIA via nvidia-smi
         if let Ok(output) = Command::new("nvidia-smi")
             .args([
@@ -95,19 +109,19 @@ async fn get_system_specs() -> Result<SystemHardwareInfo, String> {
             }
         }
 
-        // Memória RAM Total via PowerShell
-        if let Ok(output) = Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-Command",
-                "[math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1MB)",
-            ])
-            .output()
-        {
-            if output.status.success() {
-                let str_ram = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                if let Ok(ram_val) = str_ram.parse::<u64>() {
-                    info.total_ram_mb = ram_val;
+        // Fallback para GPUs AMD/Intel via WMI. A VRAM dedicada pode não ser reportada
+        // de forma confiável por todos os drivers; nesse caso permanece zero.
+        if !info.has_nvidia_gpu {
+            if let Ok(output) = Command::new("powershell").args([
+                "-NoProfile", "-Command",
+                "Get-CimInstance Win32_VideoController | Select-Object -First 1 -ExpandProperty Name"
+            ]).output() {
+                if output.status.success() {
+                    let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    if !name.is_empty() {
+                        info.gpu_name = name.clone();
+                        info.has_amd_gpu = name.to_lowercase().contains("amd") || name.to_lowercase().contains("radeon");
+                    }
                 }
             }
         }
@@ -337,6 +351,91 @@ async fn comfyui_get_output_image(
     Ok(format!("data:image/png;base64,{}", b64))
 }
 
+// Requisições do Image Studio executadas no backend nativo, fora do WebView.
+fn comfy_endpoint(endpoint: &str) -> Result<String, String> {
+    let endpoint = endpoint.trim().trim_end_matches('/');
+    let parsed = reqwest::Url::parse(endpoint)
+        .map_err(|e| format!("Endpoint ComfyUI inválido: {e}"))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err("O endpoint do ComfyUI deve usar HTTP ou HTTPS.".into());
+    }
+    Ok(endpoint.to_string())
+}
+
+fn comfy_client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(4))
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("Não foi possível inicializar o cliente HTTP: {e}"))
+}
+
+#[tauri::command]
+async fn comfy_check_status(endpoint: String) -> Result<bool, String> {
+    let base = comfy_endpoint(&endpoint)?;
+    let client = comfy_client()?;
+    for path in ["/system_stats", "/"] {
+        if let Ok(response) = client.get(format!("{base}{path}")).send().await {
+            if response.status().is_success() { return Ok(true); }
+        }
+    }
+    Ok(false)
+}
+
+#[tauri::command]
+async fn comfy_queue_prompt(endpoint: String, payload: serde_json::Value) -> Result<serde_json::Value, String> {
+    let base = comfy_endpoint(&endpoint)?;
+    let client = comfy_client()?;
+    let response = client.post(format!("{base}/prompt"))
+        .json(&payload).send().await
+        .map_err(|e| format!("Falha ao enviar workflow ao ComfyUI: {e}"))?;
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(format!("ComfyUI recusou o workflow (HTTP {status}): {body}"));
+    }
+    serde_json::from_str(&body)
+        .map_err(|e| format!("Resposta inválida do ComfyUI: {e}. Conteúdo: {body}"))
+}
+
+#[tauri::command]
+async fn comfy_get_history(endpoint: String, prompt_id: String) -> Result<serde_json::Value, String> {
+    if prompt_id.is_empty() || !prompt_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return Err("ID de tarefa do ComfyUI inválido.".into());
+    }
+    let base = comfy_endpoint(&endpoint)?;
+    let client = comfy_client()?;
+    let response = client.get(format!("{base}/history/{prompt_id}"))
+        .send().await
+        .map_err(|e| format!("Falha ao consultar histórico do ComfyUI: {e}"))?;
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(format!("ComfyUI retornou HTTP {status} ao consultar histórico: {body}"));
+    }
+    serde_json::from_str(&body).map_err(|e| format!("Histórico inválido do ComfyUI: {e}"))
+}
+
+#[tauri::command]
+async fn comfy_get_view_image(
+    endpoint: String, filename: String, subfolder: String, type_folder: String
+) -> Result<Vec<u8>, String> {
+    let base = comfy_endpoint(&endpoint)?;
+    let client = comfy_client()?;
+    let response = client.get(format!("{base}/view"))
+        .query(&[("filename", filename), ("subfolder", subfolder), ("type", type_folder)])
+        .send().await
+        .map_err(|e| format!("Falha ao baixar imagem do ComfyUI: {e}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("ComfyUI retornou HTTP {status} ao baixar imagem: {body}"));
+    }
+    response.bytes().await
+        .map(|b| b.to_vec())
+        .map_err(|e| format!("Falha ao ler bytes da imagem: {e}"))
+}
+
 // ==========================================
 // 3. ARQUIVOS & TERMINAL
 // ==========================================
@@ -540,6 +639,10 @@ pub fn run() {
             get_system_specs,
             diagnose_local_ai,
             check_comfyui_status,
+            comfy_check_status,
+            comfy_queue_prompt,
+            comfy_get_history,
+            comfy_get_view_image,
             comfyui_upload_image,
             comfyui_get_output_image,
             write_file,

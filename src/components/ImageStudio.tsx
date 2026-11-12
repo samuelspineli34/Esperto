@@ -33,12 +33,11 @@ export const ImageStudio: React.FC<Props> = ({ onErrorTrigger, onSendImageToChat
   const [hardwareInfo, setHardwareInfo] = useState<HardwareAuditResult | null>(null);
 
   // Parâmetros de Geração e Edição
-  const [selectedModel, setSelectedModel] = useState<'flux-2-klein' | 'sdxl-turbo'>('flux-2-klein');
+  const [selectedModel, setSelectedModel] = useState<'flux-2-klein' | 'flux-2-klein-distilled'>('flux-2-klein-distilled');
   const [prompt, setPrompt] = useState('Edite esta imagem transformando em iluminação dramática cyberpunk com detalhes 8k');
   const [negativePrompt, setNegativePrompt] = useState('low quality, blurry, deformed, extra fingers, text, watermark');
-  const [denoiseStrength, setDenoiseStrength] = useState(0.45); // 0.05 a 1.0 (intensidade de alteração)
+  const [guidanceStrength, setDenoiseStrength] = useState(0.45); // 0.05 a 1.0 (intensidade de alteração)
   const [steps, setSteps] = useState(20);
-  const [cfgScale, setCfgScale] = useState(3.5);
   const [referenceImage, setReferenceImage] = useState<string | null>(null);
 
   // Estados de Renderização
@@ -102,9 +101,8 @@ export const ImageStudio: React.FC<Props> = ({ onErrorTrigger, onSendImageToChat
         prompt: prompt.trim(),
         negativePrompt: negativePrompt.trim(),
         referenceImageBase64: referenceImage || undefined,
-        denoiseStrength,
+        guidanceStrength,
         steps,
-        cfgScale,
         onProgress: (percent, status) => {
           setGenerationProgress(percent);
           setProgressStatus(status);
@@ -116,7 +114,7 @@ export const ImageStudio: React.FC<Props> = ({ onErrorTrigger, onSendImageToChat
     } catch (err: any) {
       onErrorTrigger({
         title: 'Falha no Image Studio (ComfyUI / FLUX)',
-        context: 'FLUX.2 Klein 4B Engine',
+        context: selectedModel === 'flux-2-klein-distilled' ? 'FLUX.2 Klein 4B Distilled Engine' : 'FLUX.2 Klein 4B Engine',
         message: err?.message || 'Não foi possível concluir o pipeline de geração da imagem.',
         technicalDetails: err?.toString() || 'ComfyUI endpoint error',
       });
@@ -154,11 +152,11 @@ export const ImageStudio: React.FC<Props> = ({ onErrorTrigger, onSendImageToChat
             <h1 className="text-base font-bold tracking-wide font-mono uppercase flex items-center gap-2">
               <span>Image Studio</span>
               <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-950/90 text-purple-300 border border-purple-700/50">
-                FLUX.2 Klein 4B
+                {selectedModel === 'flux-2-klein' ? 'FLUX.2 Klein 4B Base' : 'FLUX.2 Klein 4B Distilled'}
               </span>
             </h1>
             <p className="text-xs text-zinc-400">
-              Edição Image-to-Image de alta fidelidade e geração local controlada via ComfyUI.
+              Geração de imagens e edição com referência, processadas localmente pelo ComfyUI.
             </p>
           </div>
         </div>
@@ -183,7 +181,7 @@ export const ImageStudio: React.FC<Props> = ({ onErrorTrigger, onSendImageToChat
             <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#10141f] border border-[#202738] text-[11px] text-zinc-400">
               <Cpu size={13} className="text-emerald-400" />
               <span className="truncate max-w-40">{hardwareInfo.specs.gpu_name}</span>
-              <span className="text-emerald-400 font-bold">{(hardwareInfo.specs.gpu_vram_mb / 1024).toFixed(0)}GB</span>
+              <span className="text-emerald-400 font-bold">{hardwareInfo.specs.gpu_vram_mb > 0 ? `${(hardwareInfo.specs.gpu_vram_mb / 1024).toFixed(0)} GB` : 'VRAM n/d'}</span>
             </div>
           )}
         </div>
@@ -195,7 +193,7 @@ export const ImageStudio: React.FC<Props> = ({ onErrorTrigger, onSendImageToChat
           <div className="text-xs space-y-1 text-amber-200/90 font-mono">
             <span className="font-bold text-amber-100 block">ComfyUI não detectado em {comfyHost}</span>
             <p className="text-[11px] leading-relaxed text-zinc-400">
-              Inicie seu servidor ComfyUI local (com o modelo <code>flux2-klein-4b.safetensors</code> na pasta de checkpoints) para processamento em GPU offline com zero latência de nuvem.
+              Inicie o ComfyUI e instale os arquivos FLUX.2 Klein nas pastas diffusion_models, text_encoders e vae.
             </p>
           </div>
         </div>
@@ -220,23 +218,28 @@ export const ImageStudio: React.FC<Props> = ({ onErrorTrigger, onSendImageToChat
                     : 'bg-[#121622] border-[#22293b] text-zinc-400 hover:text-white'
                 }`}
               >
-                <span className="block text-purple-200">FLUX.2 Klein 4B</span>
-                <span className="text-[10px] text-zinc-500">Alta Fidelidade Fotográfica</span>
+                <span className="block text-purple-200">FLUX.2 Klein 4B Base</span>
+                <span className="text-[10px] text-zinc-500">Base (20 etapas, maior flexibilidade)</span>
               </button>
 
               <button
                 type="button"
-                onClick={() => setSelectedModel('sdxl-turbo')}
+                onClick={() => setSelectedModel('flux-2-klein-distilled')}
                 className={`p-2.5 rounded-lg border text-left transition ${
-                  selectedModel === 'sdxl-turbo'
+                  selectedModel === 'flux-2-klein-distilled'
                     ? 'bg-purple-950/70 border-purple-500/60 text-white font-bold'
                     : 'bg-[#121622] border-[#22293b] text-zinc-400 hover:text-white'
                 }`}
               >
-                <span className="block text-zinc-200">SDXL Turbo</span>
-                <span className="text-[10px] text-zinc-500">Ultra Veloz (4 Passos)</span>
+                <span className="block text-zinc-200">FLUX.2 Klein 4B Distilled</span>
+                <span className="text-[10px] text-zinc-500">Versão rápida (4 etapas)</span>
               </button>
             </div>
+            <p className="text-[10px] text-zinc-500 leading-relaxed">
+              {selectedModel === 'flux-2-klein'
+                ? 'Requer flux2-klein-4b.safetensors e os componentes correspondentes instalados no ComfyUI.'
+                : 'Requer flux-2-klein-4b-fp8.safetensors instalado em models/diffusion_models, além do encoder Qwen 3 4B e do VAE FLUX.2. O workflow usa 4 etapas.'}
+            </p>
           </div>
 
           {/* Upload de Imagem de Referência (Image-to-Image) */}
@@ -290,25 +293,25 @@ export const ImageStudio: React.FC<Props> = ({ onErrorTrigger, onSendImageToChat
             )}
           </div>
 
-          {/* Slider de Intensidade de Alteração (Denoising Strength) */}
+          {/* Slider de Intensidade de Alteração (Prompt Guidance) */}
           {referenceImage && (
             <div className="p-3.5 bg-[#0d1018] border border-[#1e2538] rounded-xl space-y-2">
               <div className="flex justify-between text-xs font-mono">
-                <span className="text-zinc-400 font-semibold uppercase">Intensidade da Alteração (Denoise)</span>
-                <span className="text-purple-300 font-bold">{(denoiseStrength * 100).toFixed(0)}%</span>
+                <span className="text-zinc-400 font-semibold uppercase">Força da Instrução</span>
+                <span className="text-purple-300 font-bold">{(guidanceStrength * 100).toFixed(0)}%</span>
               </div>
               <input
                 type="range"
                 min="0.05"
                 max="1.0"
                 step="0.05"
-                value={denoiseStrength}
+                value={guidanceStrength}
                 onChange={(e) => setDenoiseStrength(parseFloat(e.target.value))}
                 className="w-full accent-purple-500 cursor-pointer"
               />
               <div className="flex justify-between text-[10px] text-zinc-500 font-mono">
-                <span>Preserva estrutura original</span>
-                <span>Modificação livre</span>
+                <span>Menor influência do prompt</span>
+                <span>Maior influência do prompt</span>
               </div>
             </div>
           )}
@@ -352,7 +355,7 @@ export const ImageStudio: React.FC<Props> = ({ onErrorTrigger, onSendImageToChat
             {isGenerating ? (
               <>
                 <RefreshCw size={14} className="animate-spin" />
-                <span>Renderizando com FLUX.2 Klein...</span>
+                <span>Renderizando imagem no ComfyUI...</span>
               </>
             ) : (
               <>

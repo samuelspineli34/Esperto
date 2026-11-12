@@ -20,16 +20,18 @@ export const ModelSelector: React.FC<Props> = ({ selectedModel, onSelect, custom
     const unsubscribe = subscribeModelChanges(() => {
       setModelsList([...AVAILABLE_MODELS]);
     });
+    void getInstalledOllamaModels(customHost, customPath).then((result) => {
+      registerLocalOllamaModels(result.models || []);
+    }).catch((error) => console.warn('Não foi possível sincronizar os modelos locais:', error));
     return unsubscribe;
-  }, []);
+  }, [customHost, customPath]);
 
   const handleRefreshOllama = async () => {
     setIsRefreshing(true);
     try {
       const result = await getInstalledOllamaModels(customHost, customPath);
-      if (result.models && result.models.length > 0) {
-        registerLocalOllamaModels(result.models);
-      }
+      // Sempre sincroniza inclusive lista vazia/offline, evitando manter modelos antigos em memória.
+      registerLocalOllamaModels(result.models || []);
     } finally {
       setIsRefreshing(false);
     }
@@ -102,7 +104,7 @@ export const ModelSelector: React.FC<Props> = ({ selectedModel, onSelect, custom
           }`}
         >
           <Cpu size={12} className="text-emerald-400" />
-          <span>Locais (GPU)</span>
+          <span>Ollama ({modelsList.filter((m) => m.provider === 'ollama').length})</span>
         </button>
         <button
           type="button"
