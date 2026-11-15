@@ -247,7 +247,7 @@ export const ImageStudio: React.FC<Props> = ({ onErrorTrigger, onSendImageToChat
               {comfyStatus.isOnline ? 'ComfyUI Online' : 'ComfyUI Offline'}
             </span>
             <button
-              onClick={refreshStatus}
+              onClick={() => refreshStatus()}
               title="Testar Conexão com ComfyUI"
               className="text-zinc-400 hover:text-white transition ml-1"
             >
